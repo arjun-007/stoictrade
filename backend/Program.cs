@@ -1,0 +1,94 @@
+using Microsoft.EntityFrameworkCore;
+using StoicTrade.Api.Data;
+using StoicTrade.Api.Services;
+using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.IdentityModel.Tokens;
+using System.Text;
+using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Mvc.Authorization;
+DotNetEnv.Env.Load();
+
+var builder = WebApplication.CreateBuilder(args);
+
+// Add services to the container.
+builder.Services.AddControllers(options =>
+{
+    var policy = new AuthorizationPolicyBuilder()
+                    .RequireAuthenticatedUser()
+                    .Build();
+    options.Filters.Add(new AuthorizeFilter(policy));
+});
+builder.Services.AddEndpointsApiExplorer();
+builder.Services.AddSwaggerGen();
+
+// Configure JWT Authentication
+var jwtSecret = builder.Configuration["JWT_SECRET"] ?? "super_secret_jwt_key_that_must_be_long_enough_for_hmac_sha256";
+builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
+    .AddJwtBearer(options =>
+    {
+        options.TokenValidationParameters = new TokenValidationParameters
+        {
+            ValidateIssuer = false,
+            ValidateAudience = false,
+            ValidateLifetime = true,
+            ValidateIssuerSigningKey = true,
+            IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwtSecret))
+        };
+    });
+
+// Configure SQLite Database
+builder.Services.AddDbContext<AppDbContext>(options =>
+    options.UseSqlite(builder.Configuration.GetConnectionString("SQLite") ?? "Data Source=stoictrade.db"));
+
+// Configure Redis Service
+builder.Services.AddSingleton<RedisService>();
+builder.Services.AddSingleton<FyersApiService>();
+builder.Services.AddSingleton<KillSwitchService>();
+
+// Configure Strategies
+builder.Services.AddSingleton<StoicTrade.Api.Services.Strategies.IStrategy, StoicTrade.Api.Services.Strategies.SupertrendStrategy>();
+builder.Services.AddSingleton<StoicTrade.Api.Services.Strategies.IStrategy, StoicTrade.Api.Services.Strategies.OrbStrategy>();
+builder.Services.AddSingleton<StoicTrade.Api.Services.Strategies.IStrategy, StoicTrade.Api.Services.Strategies.EmaPullbackStrategy>();
+builder.Services.AddSingleton<StoicTrade.Api.Services.Strategies.IStrategy, StoicTrade.Api.Services.Strategies.BollingerSqueezeStrategy>();
+builder.Services.AddSingleton<StoicTrade.Api.Services.Strategies.IStrategy, StoicTrade.Api.Services.Strategies.Nr7Strategy>();
+builder.Services.AddSingleton<StoicTrade.Api.Services.Strategies.IStrategy, StoicTrade.Api.Services.Strategies.MacdStrategy>();
+
+// Register Strategy Engine Background Service
+builder.Services.AddHostedService<StoicTrade.Api.Services.Strategies.StrategyEngineService>();
+
+// Configure CORS for Next.js frontend
+builder.Services.AddCors(options =>
+{
+    options.AddPolicy("AllowFrontend",
+        policy =>
+        {
+            policy.WithOrigins("http://localhost:3000") // Next.js default port
+                  .AllowAnyHeader()
+                  .AllowAnyMethod();
+        });
+});
+
+var app = builder.Build();
+
+// Configure the HTTP request pipeline.
+if (app.Environment.IsDevelopment())
+{
+    app.UseSwagger();
+    app.UseSwaggerUI();
+}
+
+app.UseHttpsRedirection();
+app.UseCors("AllowFrontend");
+app.UseAuthentication();
+app.UseMiddleware<StoicTrade.Api.Middlewares.RmsMiddleware>();
+app.UseAuthorization();
+app.MapControllers();
+
+// Run migrations and seed data
+using (var scope = app.Services.CreateScope())
+{
+    var dbContext = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+    dbContext.Database.EnsureCreated(); // Simple approach for now instead of full migrations
+}
+
+app.Run();
