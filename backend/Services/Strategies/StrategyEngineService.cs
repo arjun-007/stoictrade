@@ -37,8 +37,24 @@ namespace StoicTrade.Api.Services.Strategies
                     // 1. Fetch enabled strategies from DB
                     var activeConfigs = dbContext.StrategyConfigs.Where(s => s.IsEnabled).ToList();
 
-                    // 2. Fetch mock market data (In reality this comes from Fyers WebSocket)
-                    string mockMarketData = "{\"symbol\": \"NIFTY\", \"price\": 22000}";
+                    // 2. Fetch market data based on TradeMode
+                    var globalSettings = dbContext.GlobalSettings.FirstOrDefault();
+                    string marketDataJson = "{\"symbol\": \"NIFTY\", \"price\": 22000}"; // Default fallback
+
+                    if (globalSettings != null && globalSettings.TradeMode == "PaperTrading")
+                    {
+                        var marketCache = scope.ServiceProvider.GetRequiredService<StoicTrade.Api.Services.MarketData.MarketDataCache>();
+                        var spot = marketCache.GetSpotData("NIFTY");
+                        if (spot != null)
+                        {
+                            marketDataJson = $"{{\"symbol\": \"NIFTY\", \"price\": {spot.Price}}}";
+                        }
+                    }
+                    else
+                    {
+                        // In reality this comes from Fyers WebSocket for Live trading
+                        // marketDataJson = GetFromFyers()
+                    }
 
                     // 3. Evaluate each active strategy
                     foreach (var config in activeConfigs)
@@ -46,7 +62,7 @@ namespace StoicTrade.Api.Services.Strategies
                         var strategy = _strategies.FirstOrDefault(s => s.Name == config.StrategyName);
                         if (strategy != null)
                         {
-                            await strategy.ExecuteAsync(config, mockMarketData);
+                            await strategy.ExecuteAsync(config, marketDataJson);
                         }
                     }
                 }

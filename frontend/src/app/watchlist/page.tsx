@@ -1,8 +1,9 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Search, TrendingUp, TrendingDown, Info, Plus, Trash2, FolderPlus } from "lucide-react";
 import OrderModal from "./OrderModal";
+import { fetchWithAuth } from "@/lib/api";
 
 interface WatchlistItem {
   id: string;
@@ -17,48 +18,100 @@ interface Watchlist {
   items: WatchlistItem[];
 }
 
-const INITIAL_WATCHLISTS: Watchlist[] = [
-  {
-    id: "wl_1",
-    name: "Nifty Options",
-    items: [
-      { id: "1", symbol: "NIFTY24MAY22000CE", price: 345.20, change: 15.4 },
-      { id: "2", symbol: "NIFTY24MAY22000PE", price: 120.10, change: -10.2 },
-    ]
-  },
-  {
-    id: "wl_2",
-    name: "Core Equities",
-    items: [
-      { id: "3", symbol: "NIFTY-EQ", price: 22150.45, change: 1.2 },
-      { id: "4", symbol: "HDFCBANK-EQ", price: 1520.00, change: 0.5 },
-    ]
-  }
-];
-
-// Mock database of all available instruments to search and add
-const ALL_INSTRUMENTS = [
-  { symbol: "NIFTY24MAY22000CE", price: 345.20, change: 15.4 },
-  { symbol: "NIFTY24MAY22000PE", price: 120.10, change: -10.2 },
-  { symbol: "NIFTY24MAY22100CE", price: 280.50, change: 12.1 },
-  { symbol: "NIFTY24MAY22100PE", price: 150.00, change: -8.5 },
-  { symbol: "NIFTY-EQ", price: 22150.45, change: 1.2 },
-  { symbol: "HDFCBANK-EQ", price: 1520.00, change: 0.5 },
-  { symbol: "RELIANCE-EQ", price: 2950.00, change: 2.1 },
-  { symbol: "BANKNIFTY-EQ", price: 47500.00, change: 0.8 },
-];
-
 export default function WatchlistPage() {
-  const [watchlists, setWatchlists] = useState<Watchlist[]>(INITIAL_WATCHLISTS);
-  const [activeWatchlistId, setActiveWatchlistId] = useState<string>(INITIAL_WATCHLISTS[0].id);
+  const [watchlists, setWatchlists] = useState<Watchlist[]>([
+    {
+      id: "wl_1",
+      name: "Nifty Options",
+      items: []
+    }
+  ]);
+  const [activeWatchlistId, setActiveWatchlistId] = useState<string>("wl_1");
+  const [liveInstruments, setLiveInstruments] = useState<WatchlistItem[]>([]);
   
   const [search, setSearch] = useState("");
   const [selectedInstrument, setSelectedInstrument] = useState<WatchlistItem | null>(null);
 
+  useEffect(() => {
+    // Poll NSE Option Chain data from our backend
+    const fetchData = async () => {
+      try {
+        const res = await fetchWithAuth("http://localhost:5000/api/marketdata/options?symbol=NIFTY");
+        if (res.ok) {
+          const data = await res.json();
+          const records = data.records?.data || [];
+          
+          const newInstruments: WatchlistItem[] = [];
+          
+          // Parse top 5 strikes around ATM
+          if (data.records?.underlyingValue && records.length > 0) {
+             const spot = data.records.underlyingValue;
+             // Push spot
+             newInstruments.push({ id: "NIFTY-SPOT", symbol: "NIFTY-SPOT", price: spot, change: 0 });
+             
+             // Find closest strike
+             let closest = records[0];
+             let minDiff = Math.abs(records[0].strikePrice - spot);
+             let closestIdx = 0;
+             for (let i = 1; i < records.length; i++) {
+                const diff = Math.abs(records[i].strikePrice - spot);
+                if (diff < minDiff) {
+                   minDiff = diff;
+                   closest = records[i];
+                   closestIdx = i;
+                }
+             }
+             
+             // Take 10 strikes around ATM
+             const startIdx = Math.max(0, closestIdx - 5);
+             const endIdx = Math.min(records.length - 1, closestIdx + 5);
+             
+             for (let i = startIdx; i <= endIdx; i++) {
+                const r = records[i];
+                if (r.CE) {
+                   newInstruments.push({
+                      id: `NIFTY${r.expiryDate}${r.strikePrice}CE`,
+                      symbol: `NIFTY${r.expiryDate}${r.strikePrice}CE`,
+                      price: r.CE.lastPrice || 0,
+                      change: r.CE.change || 0
+                   });
+                }
+                if (r.PE) {
+                   newInstruments.push({
+                      id: `NIFTY${r.expiryDate}${r.strikePrice}PE`,
+                      symbol: `NIFTY${r.expiryDate}${r.strikePrice}PE`,
+                      price: r.PE.lastPrice || 0,
+                      change: r.PE.change || 0
+                   });
+                }
+             }
+             
+             setLiveInstruments(newInstruments);
+             
+             // Update prices in the active watchlists
+             setWatchlists(prevLists => prevLists.map(wl => ({
+                 ...wl,
+                 items: wl.items.map(item => {
+                     const live = newInstruments.find(l => l.symbol === item.symbol);
+                     return live ? { ...item, price: live.price, change: live.change } : item;
+                 })
+             })));
+          }
+        }
+      } catch (e) {
+        console.error("Failed to fetch live data", e);
+      }
+    };
+    
+    fetchData();
+    const interval = setInterval(fetchData, 3000);
+    return () => clearInterval(interval);
+  }, []);
+
   const activeWatchlist = watchlists.find(w => w.id === activeWatchlistId);
 
   // Filter available instruments for the search dropdown
-  const searchResults = search.trim() === "" ? [] : ALL_INSTRUMENTS.filter(inst => 
+  const searchResults = search.trim() === "" ? [] : liveInstruments.filter(inst => 
     inst.symbol.toLowerCase().includes(search.toLowerCase()) && 
     !activeWatchlist?.items.find(item => item.symbol === inst.symbol)
   );
@@ -93,7 +146,7 @@ export default function WatchlistPage() {
   const addInstrumentToWatchlist = (symbol: string) => {
     if (!activeWatchlist) return;
     
-    const instrumentTemplate = ALL_INSTRUMENTS.find(i => i.symbol === symbol);
+    const instrumentTemplate = liveInstruments.find(i => i.symbol === symbol);
     if (!instrumentTemplate) return;
 
     const newItem: WatchlistItem = {

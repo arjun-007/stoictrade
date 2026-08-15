@@ -12,6 +12,13 @@ export default function Dashboard() {
   const [pin, setPin] = useState("");
   const [error, setError] = useState<string | null>(null);
 
+  // Kill Switch Modal state
+  const [showKillModal, setShowKillModal] = useState(false);
+  const [openPositions, setOpenPositions] = useState([
+    { id: '1', symbol: 'NIFTY24MAY22000CE', qty: 50, pnl: 2500, selected: true },
+    { id: '2', symbol: 'HDFCBANK-EQ', qty: 100, pnl: -450, selected: true }
+  ]);
+
   useEffect(() => {
     // Check initial kill switch status
     fetchWithAuth("http://localhost:5000/api/killswitch/status")
@@ -30,18 +37,25 @@ export default function Dashboard() {
       .catch((err) => console.error("Failed to fetch settings", err));
   }, []);
 
-  const handleKillSwitch = async () => {
-    if (!confirm(`Are you sure? This will cancel all orders, exit all positions, and lock the account for ${shutdownMinutes} minutes!`)) return;
-    
+  const handleKillSwitch = () => {
+    setShowKillModal(true);
+  };
+
+  const confirmKillSwitch = async () => {
     try {
+      // In a real app, we would pass the selected positions to the backend to exit them
+      const selectedPositions = openPositions.filter(p => p.selected).map(p => p.id);
+      
       const res = await fetchWithAuth("http://localhost:5000/api/killswitch/trigger", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ reason: "Manual UI Trigger" })
+        body: JSON.stringify({ reason: "Manual UI Trigger", closePositions: selectedPositions })
       });
+      
       if (res.ok) {
         setIsLocked(true);
-        alert("Account has been locked successfully.");
+        setShowKillModal(false);
+        alert("Account has been locked and selected positions have been scheduled for exit.");
       }
     } catch (err) {
       console.error(err);
@@ -212,6 +226,66 @@ export default function Dashboard() {
           </div>
         </div>
       </div>
+
+      {showKillModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
+          <div className="bg-surface rounded-2xl w-full max-w-lg shadow-xl overflow-hidden border border-slate-200 dark:border-slate-800">
+            <div className="bg-danger p-6 text-white text-center">
+              <ShieldAlert className="w-12 h-12 mx-auto mb-3" />
+              <h2 className="text-2xl font-bold">ENGAGE KILL SWITCH</h2>
+              <p className="text-red-100 mt-1">This will lock the account for {shutdownMinutes} minutes!</p>
+            </div>
+            
+            <div className="p-6">
+              <h3 className="font-bold text-slate-900 dark:text-white mb-4">Open Positions to Close</h3>
+              
+              {openPositions.length === 0 ? (
+                <p className="text-slate-500 mb-6">No active positions open.</p>
+              ) : (
+                <div className="space-y-3 mb-6 max-h-48 overflow-y-auto">
+                  {openPositions.map(pos => (
+                    <label key={pos.id} className="flex items-center gap-3 p-3 rounded-lg border border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800/50 cursor-pointer transition-colors">
+                      <input 
+                        type="checkbox" 
+                        checked={pos.selected}
+                        onChange={(e) => {
+                          setOpenPositions(openPositions.map(p => p.id === pos.id ? { ...p, selected: e.target.checked } : p))
+                        }}
+                        className="w-5 h-5 text-danger rounded border-slate-300 focus:ring-danger"
+                      />
+                      <div className="flex-1 flex justify-between items-center">
+                        <div>
+                          <p className="font-bold">{pos.symbol}</p>
+                          <p className="text-xs text-slate-500">Qty: {pos.qty}</p>
+                        </div>
+                        <p className={`font-bold ${pos.pnl >= 0 ? "text-green-500" : "text-danger"}`}>
+                          {pos.pnl >= 0 ? "+" : ""}₹{Math.abs(pos.pnl)}
+                        </p>
+                      </div>
+                    </label>
+                  ))}
+                </div>
+              )}
+              
+              <div className="flex gap-4">
+                <button 
+                  onClick={() => setShowKillModal(false)}
+                  className="flex-1 py-3 px-4 rounded-xl font-bold bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 transition-colors"
+                >
+                  Cancel
+                </button>
+                <button 
+                  onClick={confirmKillSwitch}
+                  className="flex-1 py-3 px-4 rounded-xl font-bold bg-danger hover:bg-danger-hover text-white transition-colors"
+                >
+                  CONFIRM LOCKDOWN
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
     </div>
   );
 }

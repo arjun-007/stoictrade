@@ -37,7 +37,7 @@ export default function SettingsPage() {
       });
   }, []);
 
-  const handleChange = (field: keyof GlobalSettings, value: number) => {
+  const handleChange = (field: keyof GlobalSettings, value: any) => {
     if (settings) {
       setSettings({ ...settings, [field]: value });
     }

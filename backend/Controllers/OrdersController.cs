@@ -1,4 +1,5 @@
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace StoicTrade.Api.Controllers
 {
@@ -18,7 +19,25 @@ namespace StoicTrade.Api.Controllers
             var settings = await Microsoft.EntityFrameworkCore.EntityFrameworkQueryableExtensions.FirstOrDefaultAsync(dbContext.GlobalSettings);
             if (settings != null && settings.TradeMode == "Paper")
             {
-                return Ok(new { Message = $"[PAPER] Order for {request.Instrument} filled instantly at CMP." });
+                var resolver = HttpContext.RequestServices.GetRequiredService<StoicTrade.Api.Services.Strategies.OptionContractResolver>();
+                var ltp = resolver.ResolveOptionLtp(request.Instrument) ?? 0m;
+                
+                var trade = new StoicTrade.Api.Models.TradeLog
+                {
+                    OrderId = Guid.NewGuid().ToString("N").Substring(0, 10).ToUpper(),
+                    StrategyName = "Manual",
+                    Instrument = request.Instrument,
+                    TradeType = request.OrderType,
+                    Quantity = request.Quantity,
+                    ExecutionPrice = ltp > 0 ? ltp : 100m, // Mock fallback if parsing fails
+                    Timestamp = DateTime.UtcNow,
+                    Status = "EXECUTED"
+                };
+                
+                dbContext.TradeLogs.Add(trade);
+                await dbContext.SaveChangesAsync();
+                
+                return Ok(new { Message = $"[PAPER] Order for {request.Instrument} filled at CMP: {trade.ExecutionPrice}" });
             }
 
             // Proceed to place order with Fyers API (mocked for now)
