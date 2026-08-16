@@ -5,6 +5,8 @@ import AuthGuard from "@/components/AuthGuard";
 
 const inter = Inter({ subsets: ["latin"] });
 
+import Providers from "@/components/Providers";
+
 export const metadata: Metadata = {
   title: "StoicTrade",
   description: "High-performance algorithmic and manual trading application.",
@@ -18,9 +20,11 @@ export default function RootLayout({
   return (
     <html lang="en">
       <body className={`${inter.className} antialiased bg-background text-foreground flex min-h-screen`}>
-        <AuthGuard>
-          {children}
-        </AuthGuard>
+        <Providers>
+          <AuthGuard>
+            {children}
+          </AuthGuard>
+        </Providers>
       </body>
     </html>
   );

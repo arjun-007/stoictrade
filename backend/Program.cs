@@ -43,7 +43,7 @@ builder.Services.AddDbContext<AppDbContext>(options =>
 // Configure Redis Service
 builder.Services.AddSingleton<RedisService>();
 builder.Services.AddSingleton<StoicTrade.Api.Services.MarketData.MarketDataCache>();
-builder.Services.AddHostedService<StoicTrade.Api.Services.MarketData.NseScraperService>();
+builder.Services.AddHostedService<StoicTrade.Api.Services.MarketData.FyersDataPollingService>();
 builder.Services.AddSingleton<StoicTrade.Api.Services.Strategies.OptionContractResolver>();
 builder.Services.AddSingleton<FyersApiService>();
 builder.Services.AddSingleton<KillSwitchService>();
@@ -60,12 +60,14 @@ builder.Services.AddSingleton<StoicTrade.Api.Services.Strategies.IStrategy, Stoi
 builder.Services.AddHostedService<StoicTrade.Api.Services.Strategies.StrategyEngineService>();
 
 // Configure CORS for Next.js frontend
+var allowedOrigins = builder.Configuration["AllowedOrigins"]?.Split(',') ?? new[] { "http://localhost:3000" };
+
 builder.Services.AddCors(options =>
 {
     options.AddPolicy("AllowFrontend",
         policy =>
         {
-            policy.WithOrigins("http://localhost:3000") // Next.js default port
+            policy.WithOrigins(allowedOrigins)
                   .AllowAnyHeader()
                   .AllowAnyMethod();
         });

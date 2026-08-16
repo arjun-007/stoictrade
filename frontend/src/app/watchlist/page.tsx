@@ -150,8 +150,8 @@ export default function WatchlistPage() {
     if (!instrumentTemplate) return;
 
     const newItem: WatchlistItem = {
-      id: `item_${Date.now()}`,
-      ...instrumentTemplate
+      ...instrumentTemplate,
+      id: `item_${Date.now()}`
     };
 
     setWatchlists(watchlists.map(wl => 
