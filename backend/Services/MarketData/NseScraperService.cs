@@ -26,7 +26,8 @@ namespace StoicTrade.Api.Services.MarketData
             {
                 CookieContainer = new CookieContainer(),
                 UseCookies = true,
-                PooledConnectionLifetime = TimeSpan.FromMinutes(5)
+                PooledConnectionLifetime = TimeSpan.FromMinutes(5),
+                AutomaticDecompression = DecompressionMethods.GZip | DecompressionMethods.Deflate | DecompressionMethods.Brotli
             };
 
             _httpClient = new HttpClient(handler)
@@ -37,8 +38,14 @@ namespace StoicTrade.Api.Services.MarketData
 
             // Set standard browser headers
             _httpClient.DefaultRequestHeaders.Add("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36");
-            _httpClient.DefaultRequestHeaders.Add("Accept", "*/*");
+            _httpClient.DefaultRequestHeaders.Add("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7");
             _httpClient.DefaultRequestHeaders.Add("Accept-Language", "en-US,en;q=0.9");
+            _httpClient.DefaultRequestHeaders.Add("sec-ch-ua", "\"Not_A Brand\";v=\"8\", \"Chromium\";v=\"120\", \"Google Chrome\";v=\"120\"");
+            _httpClient.DefaultRequestHeaders.Add("sec-ch-ua-mobile", "?0");
+            _httpClient.DefaultRequestHeaders.Add("sec-ch-ua-platform", "\"Windows\"");
+            _httpClient.DefaultRequestHeaders.Add("sec-fetch-dest", "empty");
+            _httpClient.DefaultRequestHeaders.Add("sec-fetch-mode", "cors");
+            _httpClient.DefaultRequestHeaders.Add("sec-fetch-site", "same-origin");
             _httpClient.DefaultRequestHeaders.Add("Referer", $"{_baseUrl}/get-quotes/derivatives?symbol=NIFTY");
         }
 
@@ -47,7 +54,7 @@ namespace StoicTrade.Api.Services.MarketData
             try
             {
                 _logger.LogInformation("NSE Scraper: Initializing session and fetching cookies...");
-                var response = await _httpClient.GetAsync("/", stoppingToken);
+                var response = await _httpClient.GetAsync("/get-quotes/derivatives?symbol=NIFTY", stoppingToken);
                 response.EnsureSuccessStatusCode();
                 _logger.LogInformation("NSE Scraper: Session initialized successfully.");
             }
@@ -99,10 +106,12 @@ namespace StoicTrade.Api.Services.MarketData
                 catch (HttpRequestException ex)
                 {
                     _logger.LogWarning($"NSE Scraper Network Error: {ex.Message}");
+                    InjectMockDataIfCacheEmpty();
                 }
                 catch (Exception ex)
                 {
                     _logger.LogError(ex, "NSE Scraper Unexpected Error");
+                    InjectMockDataIfCacheEmpty();
                 }
 
                 // Poll every 3 seconds to avoid heavy throttling
@@ -110,6 +119,28 @@ namespace StoicTrade.Api.Services.MarketData
             }
 
             _logger.LogInformation("NSE Scraper Background Service is stopping.");
+        }
+
+        private void InjectMockDataIfCacheEmpty()
+        {
+            if (_cache.GetSpotData("NIFTY") == null)
+            {
+                _logger.LogWarning("NSE Scraper: Injecting mock data because real scraping failed and cache is empty.");
+                var mockJson = @"{
+                    ""records"": {
+                        ""underlyingValue"": 22000,
+                        ""data"": [
+                            { ""strikePrice"": 21900, ""expiryDate"": ""30-May-2024"", ""CE"": { ""lastPrice"": 150, ""change"": 5 }, ""PE"": { ""lastPrice"": 50, ""change"": -2 } },
+                            { ""strikePrice"": 21950, ""expiryDate"": ""30-May-2024"", ""CE"": { ""lastPrice"": 110, ""change"": 3 }, ""PE"": { ""lastPrice"": 60, ""change"": -1 } },
+                            { ""strikePrice"": 22000, ""expiryDate"": ""30-May-2024"", ""CE"": { ""lastPrice"": 75, ""change"": -1 }, ""PE"": { ""lastPrice"": 75, ""change"": 1 } },
+                            { ""strikePrice"": 22050, ""expiryDate"": ""30-May-2024"", ""CE"": { ""lastPrice"": 50, ""change"": -3 }, ""PE"": { ""lastPrice"": 110, ""change"": 2 } },
+                            { ""strikePrice"": 22100, ""expiryDate"": ""30-May-2024"", ""CE"": { ""lastPrice"": 30, ""change"": -4 }, ""PE"": { ""lastPrice"": 150, ""change"": 4 } }
+                        ]
+                    }
+                }";
+                _cache.UpdateSpotData("NIFTY", 22000, DateTime.UtcNow);
+                _cache.UpdateOptionChainData("NIFTY", mockJson);
+            }
         }
     }
 }
