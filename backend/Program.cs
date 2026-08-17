@@ -6,6 +6,8 @@ using Microsoft.IdentityModel.Tokens;
 using System.Text;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc.Authorization;
+using StoicTrade.Api.Services.MarketData;
+using StoicTrade.Api.Services.Strategies;
 DotNetEnv.Env.Load();
 
 var builder = WebApplication.CreateBuilder(args);
