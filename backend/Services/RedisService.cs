@@ -92,6 +92,7 @@ namespace StoicTrade.Api.Services
 
         public async Task<IEnumerable<string>> GetKeysByPrefixAsync(string prefix)
         {
+            await Task.CompletedTask;
             var keys = new List<string>();
             if (IsRedisAvailable)
             {
@@ -102,7 +103,8 @@ namespace StoicTrade.Api.Services
                     var server = _redis.GetServer(endpoints[0]);
                     foreach (var key in server.Keys(pattern: prefix + "*"))
                     {
-                        keys.Add(key);
+                        var keyStr = key.ToString();
+                        if (keyStr != null) keys.Add(keyStr);
                     }
                     return keys;
                 }

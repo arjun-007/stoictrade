@@ -7,6 +7,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using StoicTrade.Api.Data;
+using StoicTrade.Api.Models;
 
 namespace StoicTrade.Api.Services.Strategies
 {
