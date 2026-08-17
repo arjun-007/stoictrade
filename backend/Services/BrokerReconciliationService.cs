@@ -46,7 +46,7 @@ namespace StoicTrade.Api.Services
                         if (mismatchDetected)
                         {
                             _logger.LogCritical("Reconciliation: Mismatch detected! Locking account.");
-                            await redisService.SetLockAsync("kill_switch:default_account", TimeSpan.FromHours(12));
+                            await redisService.SetValueAsync("kill_switch:default_account", "LOCKED", TimeSpan.FromHours(12));
                             fyersApi.Disconnect(); // Halt further actions
                         }
                     }

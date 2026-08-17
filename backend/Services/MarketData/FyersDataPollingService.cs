@@ -42,7 +42,7 @@ namespace StoicTrade.Api.Services.MarketData
                 try
                 {
                     // 1. Ensure we have a valid token
-                    var token = await _fyersApi.GetDailyAccessTokenAsync();
+                    var token = _fyersApi.GetAccessToken();
                     if (string.IsNullOrEmpty(token))
                     {
                         _logger.LogWarning("Fyers Poller: Waiting for access token...");

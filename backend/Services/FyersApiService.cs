@@ -72,8 +72,10 @@ namespace StoicTrade.Api.Services
             
             _logger.LogInformation("Fyers API: Successfully generated new access token!");
             IsEngineRunning = true;
-            return _accessToken;
+            return _accessToken ?? string.Empty;
         }
+
+        public string? GetAccessToken() => _accessToken;
 
         private string GenerateTotpPin(string secret)
         {
