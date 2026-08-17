@@ -1,0 +1,3 @@
+api.stoictrade.in {
+    reverse_proxy api:8080
+}

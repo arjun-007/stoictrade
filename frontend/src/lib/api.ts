@@ -11,7 +11,10 @@ export async function fetchWithAuth(url: string, options: RequestInit = {}) {
     headers.set("Authorization", `Bearer ${token}`);
   }
 
-  const res = await fetch(url, {
+  const baseUrl = process.env.NEXT_PUBLIC_API_URL || "";
+  const fullUrl = url.startsWith("/") ? `${baseUrl}${url}` : url;
+
+  const res = await fetch(fullUrl, {
     ...options,
     headers,
   });

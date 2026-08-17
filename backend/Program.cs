@@ -60,7 +60,7 @@ builder.Services.AddSingleton<StoicTrade.Api.Services.Strategies.IStrategy, Stoi
 builder.Services.AddHostedService<StoicTrade.Api.Services.Strategies.StrategyEngineService>();
 
 // Configure CORS for Next.js frontend
-var allowedOrigins = builder.Configuration["AllowedOrigins"]?.Split(',') ?? new[] { "http://localhost:3000", "https://stoictrade-production.up.railway.app" };
+var allowedOrigins = builder.Configuration["AllowedOrigins"]?.Split(',') ?? new[] { "http://localhost:3000", "https://stoictrade-production.up.railway.app", "https://www.stoictrade.in", "https://stoictrade.in" };
 
 builder.Services.AddCors(options =>
 {
