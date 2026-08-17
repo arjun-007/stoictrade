@@ -49,6 +49,8 @@ namespace StoicTrade.Api.Controllers
             settings.PerTradeStopLossPoint = updatedSettings.PerTradeStopLossPoint;
             settings.PerTradeGainPoint = updatedSettings.PerTradeGainPoint;
             settings.TradeMode = updatedSettings.TradeMode;
+            settings.TradingWindowStart = updatedSettings.TradingWindowStart;
+            settings.TradingWindowEnd = updatedSettings.TradingWindowEnd;
             settings.KillSwitchShutdownMinutes = updatedSettings.KillSwitchShutdownMinutes;
 
             await _context.SaveChangesAsync();

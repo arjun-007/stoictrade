@@ -31,6 +31,8 @@ namespace StoicTrade.Api.Data
                     PerTradeStopLossPoint = 10,
                     PerTradeGainPoint = 30,
                     TradeMode = "Paper",
+                    TradingWindowStart = new TimeSpan(9, 30, 0),
+                    TradingWindowEnd = new TimeSpan(15, 10, 0),
                     KillSwitchShutdownMinutes = 720
                 }
             );

@@ -97,6 +97,16 @@ using (var scope = app.Services.CreateScope())
 {
     var dbContext = scope.ServiceProvider.GetRequiredService<AppDbContext>();
     dbContext.Database.EnsureCreated(); // Simple approach for now instead of full migrations
+
+    try 
+    {
+        dbContext.Database.ExecuteSqlRaw("ALTER TABLE GlobalSettings ADD COLUMN TradingWindowStart TEXT DEFAULT '09:30:00'");
+        dbContext.Database.ExecuteSqlRaw("ALTER TABLE GlobalSettings ADD COLUMN TradingWindowEnd TEXT DEFAULT '15:10:00'");
+    } 
+    catch 
+    {
+        // Columns probably already exist, ignore exception
+    }
 }
 
 app.Run();
