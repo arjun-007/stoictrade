@@ -20,7 +20,7 @@ export default function StrategiesPage() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    fetchWithAuth("http://localhost:5000/api/strategyconfig")
+    fetchWithAuth("/api/strategyconfig")
       .then(res => res.json())
       .then(data => {
         setStrategies(data);
@@ -40,7 +40,7 @@ export default function StrategiesPage() {
     setStrategies(strategies.map(s => s.id === id ? updated : s));
 
     try {
-      await fetchWithAuth(`http://localhost:5000/api/strategyconfig/${id}`, {
+      await fetchWithAuth(`/api/strategyconfig/${id}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(updated)
@@ -74,7 +74,7 @@ export default function StrategiesPage() {
     const strategy = strategies.find(s => s.id === id);
     if (!strategy) return;
     try {
-      await fetchWithAuth(`http://localhost:5000/api/strategyconfig/${id}`, {
+      await fetchWithAuth(`/api/strategyconfig/${id}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(strategy)

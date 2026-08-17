@@ -24,7 +24,7 @@ export default function SettingsPage() {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    fetchWithAuth("http://localhost:5000/api/globalsettings")
+    fetchWithAuth("/api/globalsettings")
       .then(res => res.json())
       .then(data => {
         setSettings(data);
@@ -48,7 +48,7 @@ export default function SettingsPage() {
     setSaving(true);
     setError(null);
     try {
-      const res = await fetchWithAuth("http://localhost:5000/api/globalsettings", {
+      const res = await fetchWithAuth("/api/globalsettings", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(settings)

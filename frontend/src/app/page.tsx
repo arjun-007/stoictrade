@@ -21,17 +21,17 @@ export default function Dashboard() {
 
   useEffect(() => {
     // Check initial kill switch status
-    fetchWithAuth("http://localhost:5000/api/killswitch/status")
+    fetchWithAuth("/api/killswitch/status")
       .then((res) => res.json())
       .then((data) => setIsLocked(data.isActive))
       .catch((err) => console.error("Failed to check status", err));
 
-    fetchWithAuth("http://localhost:5000/api/engine/status")
+    fetchWithAuth("/api/engine/status")
       .then((res) => res.json())
       .then((data) => setIsEngineRunning(data.isRunning))
       .catch((err) => console.error("Failed to check engine status", err));
 
-    fetchWithAuth("http://localhost:5000/api/globalsettings")
+    fetchWithAuth("/api/globalsettings")
       .then((res) => res.json())
       .then((data) => setShutdownMinutes(data.killSwitchShutdownMinutes || 720))
       .catch((err) => console.error("Failed to fetch settings", err));
@@ -46,7 +46,7 @@ export default function Dashboard() {
       // In a real app, we would pass the selected positions to the backend to exit them
       const selectedPositions = openPositions.filter(p => p.selected).map(p => p.id);
       
-      const res = await fetchWithAuth("http://localhost:5000/api/killswitch/trigger", {
+      const res = await fetchWithAuth("/api/killswitch/trigger", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ reason: "Manual UI Trigger", closePositions: selectedPositions })
@@ -64,7 +64,7 @@ export default function Dashboard() {
 
   const requestTotp = async () => {
     try {
-      const res = await fetchWithAuth("http://localhost:5000/api/totp/request", { method: "POST" });
+      const res = await fetchWithAuth("/api/totp/request", { method: "POST" });
       const data = await res.json();
       alert(data.message || data.error);
     } catch (err) {
@@ -80,7 +80,7 @@ export default function Dashboard() {
       const hashArray = Array.from(new Uint8Array(hashBuffer));
       const hashHex = hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
 
-      const res = await fetchWithAuth("http://localhost:5000/api/totp/generate", {
+      const res = await fetchWithAuth("/api/totp/generate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ pin: hashHex })
@@ -99,7 +99,7 @@ export default function Dashboard() {
   const toggleEngine = async () => {
     try {
       const endpoint = isEngineRunning ? "stop" : "start";
-      const res = await fetchWithAuth(`http://localhost:5000/api/engine/${endpoint}`, { method: "POST" });
+      const res = await fetchWithAuth(`/api/engine/${endpoint}`, { method: "POST" });
       if (res.ok) {
         setIsEngineRunning(!isEngineRunning);
       } else {

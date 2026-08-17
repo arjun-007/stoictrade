@@ -36,7 +36,7 @@ export default function WatchlistPage() {
     // Poll NSE Option Chain data from our backend
     const fetchData = async () => {
       try {
-        const res = await fetchWithAuth("http://localhost:5000/api/marketdata/options?symbol=NIFTY");
+        const res = await fetchWithAuth("/api/marketdata/options?symbol=NIFTY");
         if (res.ok) {
           const data = await res.json();
           const records = data.records?.data || [];

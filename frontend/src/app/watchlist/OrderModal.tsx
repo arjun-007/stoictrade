@@ -39,7 +39,7 @@ export default function OrderModal({ instrument, price = 0, change = 0, onClose 
         target: target ? Number(target) : null
       };
 
-      const res = await fetchWithAuth("http://localhost:5000/api/orders", {
+      const res = await fetchWithAuth("/api/orders", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),

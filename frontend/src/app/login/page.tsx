@@ -13,8 +13,7 @@ export default function LoginPage() {
     setError("");
 
     try {
-      const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000";
-      const res = await fetch(`${apiUrl}/api/auth/google-login`, {
+      const res = await fetch(`/api/auth/google-login`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
