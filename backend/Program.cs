@@ -42,8 +42,9 @@ builder.Services.AddDbContext<AppDbContext>(options =>
 
 // Configure Redis Service
 builder.Services.AddSingleton<RedisService>();
-builder.Services.AddSingleton<StoicTrade.Api.Services.MarketData.MarketDataCache>();
-builder.Services.AddHostedService<StoicTrade.Api.Services.MarketData.FyersDataPollingService>();
+builder.Services.AddSingleton<MarketDataCache>();
+builder.Services.AddSingleton<MarketDataAggregatorService>();
+builder.Services.AddHostedService<FyersDataPollingService>();
 builder.Services.AddSingleton<StoicTrade.Api.Services.Strategies.OptionSelectionEngine>();
 builder.Services.AddSingleton<FyersApiService>();
 builder.Services.AddSingleton<KillSwitchService>();

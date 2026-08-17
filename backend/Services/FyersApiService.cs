@@ -140,5 +140,54 @@ namespace StoicTrade.Api.Services
             await Task.Delay(50);
             return new Random().Next(100000, 999999).ToString();
         }
+
+        public async Task<System.Collections.Generic.List<StoicTrade.Api.Models.Candle>> GetHistoricalCandlesAsync(string symbol, string resolution, DateTime from, DateTime to)
+        {
+            if (string.IsNullOrEmpty(_accessToken))
+            {
+                _logger.LogWarning("Fyers API: Cannot fetch history without access token.");
+                return new System.Collections.Generic.List<StoicTrade.Api.Models.Candle>();
+            }
+
+            long fromEpoch = new DateTimeOffset(from).ToUnixTimeSeconds();
+            long toEpoch = new DateTimeOffset(to).ToUnixTimeSeconds();
+            
+            var url = $"https://api-t1.fyers.in/api/v3/history/?symbol={symbol}&resolution={resolution}&date_format=0&range_from={fromEpoch}&range_to={toEpoch}";
+
+            var request = new HttpRequestMessage(HttpMethod.Get, url);
+            request.Headers.Add("Authorization", $"{_config["FYERS_APP_ID"]}:{_accessToken}"); // Fyers Auth format: AppId:AccessToken
+
+            var response = await _httpClient.SendAsync(request);
+            if (!response.IsSuccessStatusCode)
+            {
+                var err = await response.Content.ReadAsStringAsync();
+                _logger.LogError("History API error: {Error}", err);
+                return new System.Collections.Generic.List<StoicTrade.Api.Models.Candle>();
+            }
+
+            var json = await response.Content.ReadFromJsonAsync<JsonElement>();
+            var candles = new System.Collections.Generic.List<StoicTrade.Api.Models.Candle>();
+
+            if (json.TryGetProperty("candles", out var candlesArray))
+            {
+                foreach (var c in candlesArray.EnumerateArray())
+                {
+                    long epoch = c[0].GetInt64();
+                    var date = DateTimeOffset.FromUnixTimeSeconds(epoch).UtcDateTime;
+
+                    candles.Add(new StoicTrade.Api.Models.Candle
+                    {
+                        Date = date,
+                        Open = c[1].GetDecimal(),
+                        High = c[2].GetDecimal(),
+                        Low = c[3].GetDecimal(),
+                        Close = c[4].GetDecimal(),
+                        Volume = c[5].GetDecimal()
+                    });
+                }
+            }
+
+            return candles;
+        }
     }
 }

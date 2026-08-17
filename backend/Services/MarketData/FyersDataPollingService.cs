@@ -18,15 +18,19 @@ namespace StoicTrade.Api.Services.MarketData
         private readonly HttpClient _httpClient;
         private readonly MarketDataCache _cache;
         private readonly FyersApiService _fyersApi;
+        private readonly MarketDataAggregatorService _aggregator;
+        private bool _isAggregatorInitialized = false;
 
         public FyersDataPollingService(
             ILogger<FyersDataPollingService> logger,
             MarketDataCache cache,
-            FyersApiService fyersApi)
+            FyersApiService fyersApi,
+            MarketDataAggregatorService aggregator)
         {
             _logger = logger;
             _cache = cache;
             _fyersApi = fyersApi;
+            _aggregator = aggregator;
             _httpClient = new HttpClient();
         }
 
@@ -70,8 +74,21 @@ namespace StoicTrade.Api.Services.MarketData
                         var dataArray = spotDoc.RootElement.GetProperty("d");
                         if (dataArray.GetArrayLength() > 0)
                         {
-                            spotPrice = dataArray[0].GetProperty("v").GetProperty("lp").GetDecimal();
+                            var v = dataArray[0].GetProperty("v");
+                            spotPrice = v.GetProperty("lp").GetDecimal();
+                            var volume = v.TryGetProperty("volume", out var vol) ? vol.GetDecimal() : 0m;
+                            
                             _cache.UpdateSpotData("NIFTY", spotPrice, DateTime.UtcNow);
+
+                            if (!_isAggregatorInitialized)
+                            {
+                                // Initialize aggregator for NIFTY spot with 1m, 5m, 15m resolutions
+                                await _aggregator.InitializeSymbolAsync("NSE:NIFTY50-INDEX", new[] { 1, 5, 15 });
+                                _isAggregatorInitialized = true;
+                            }
+                            
+                            // Update the live forming candles
+                            _aggregator.UpdateTick("NSE:NIFTY50-INDEX", spotPrice, volume);
                         }
                     }
                     catch { /* Handle unexpected JSON safely */ }

@@ -38,15 +38,18 @@ namespace StoicTrade.Api.Services.Strategies
                     continue;
                 }
 
-                // If multiple strategies say BUY, just take the first one (or we could sum quantity, but for now we take the highest priority)
-                // We'll just take the first one to avoid doubling risk
+                // If multiple strategies say BUY, take the one with highest priority (lower number = higher priority)
                 if (buySignals.Any())
                 {
-                    aggregatedSignals.Add(buySignals.First());
+                    var bestBuy = buySignals.OrderBy(s => s.Priority).First();
+                    _logger.LogInformation("SignalAggregator: Selected BUY signal from {Strategy} due to priority {Priority}", bestBuy.StrategyName, bestBuy.Priority);
+                    aggregatedSignals.Add(bestBuy);
                 }
                 else if (sellSignals.Any())
                 {
-                    aggregatedSignals.Add(sellSignals.First());
+                    var bestSell = sellSignals.OrderBy(s => s.Priority).First();
+                    _logger.LogInformation("SignalAggregator: Selected SELL signal from {Strategy} due to priority {Priority}", bestSell.StrategyName, bestSell.Priority);
+                    aggregatedSignals.Add(bestSell);
                 }
             }
 
