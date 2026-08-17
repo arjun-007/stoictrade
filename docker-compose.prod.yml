@@ -9,7 +9,7 @@ services:
       - "5000:8080"
     environment:
       - ASPNETCORE_ENVIRONMENT=Production
-      - AllowedOrigins=${FRONTEND_URL:-http://localhost:3000}
+      - AllowedOrigins=${FRONTEND_URL:-http://localhost:3000,https://stoictrade-production.up.railway.app,https://www.stoictrade.in,https://stoictrade.in}
       - ConnectionStrings__Redis=redis:6379
       - ConnectionStrings__SQLite=Data Source=/app/data/stoictrade.db
       - TOTP_SECRET_ENC=${TOTP_SECRET_ENC}
