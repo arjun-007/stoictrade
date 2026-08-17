@@ -12,6 +12,7 @@ interface StrategyConfig {
   perTradeGainPoint: number;
   timeframeMinutes: number;
   trailingStopLossPoint: number;
+  operatingMode: string;
   additionalParamsJson: string; // JSON string from backend
 }
 
@@ -51,6 +52,10 @@ export default function StrategiesPage() {
   };
 
   const updateParam = (id: number, field: keyof StrategyConfig, value: number) => {
+    setStrategies(strategies.map(s => s.id === id ? { ...s, [field]: value } : s));
+  };
+
+  const updateStringParam = (id: number, field: keyof StrategyConfig, value: string) => {
     setStrategies(strategies.map(s => s.id === id ? { ...s, [field]: value } : s));
   };
 
@@ -222,6 +227,19 @@ export default function StrategiesPage() {
                     <><Play className="w-4 h-4" /> Enable</>
                   )}
                 </button>
+              </div>
+
+              <div className="mb-4">
+                <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1">Operating Mode</label>
+                <select 
+                  value={strategy.operatingMode || "ApprovalRequired"} 
+                  onChange={e => updateStringParam(strategy.id, 'operatingMode', e.target.value)}
+                  className="w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-transparent focus:ring-2 focus:ring-primary outline-none"
+                >
+                  <option value="Automatic">Fully Automatic</option>
+                  <option value="ApprovalRequired">Approval Required</option>
+                  <option value="SignalOnly">Signal Only</option>
+                </select>
               </div>
 
               <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-2">
