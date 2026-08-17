@@ -40,11 +40,11 @@ namespace StoicTrade.Api.Services.Strategies
             if (lastSt == null || lastCandle == null || lastSt.SuperTrend == null) return null;
 
             string stateKey = $"strategy_state_{config.Id}";
-            var currentState = await _redis.GetLockAsync(stateKey) ?? "Idle";
+            var currentState = await _redis.GetValueAsync(stateKey) ?? "Idle";
 
             if (currentState == "Idle" && lastCandle.Close > (decimal)lastSt.SuperTrend)
             {
-                await _redis.SetLockAsync(stateKey, "InPosition", TimeSpan.FromHours(8));
+                await _redis.SetValueAsync(stateKey, "InPosition", TimeSpan.FromHours(8));
                 return new Signal { StrategyName = Name, Instrument = "NIFTY", Action = "BUY", Quantity = 50, OrderType = "MARKET", Price = lastCandle.Close, Priority = 2 };
             }
             else if (currentState == "InPosition" && lastCandle.Close < (decimal)lastSt.SuperTrend)
@@ -98,13 +98,13 @@ namespace StoicTrade.Api.Services.Strategies
             }
 
             string stateKey = $"strategy_state_{config.Id}";
-            var currentState = await _redis.GetLockAsync(stateKey) ?? "Idle";
+            var currentState = await _redis.GetValueAsync(stateKey) ?? "Idle";
 
             if (currentState == "Idle")
             {
                 if (lastCandle.Close > orbHigh && (!useVwap || lastCandle.Close > vwap))
                 {
-                    await _redis.SetLockAsync(stateKey, "InPosition_Long", TimeSpan.FromHours(8));
+                    await _redis.SetValueAsync(stateKey, "InPosition_Long", TimeSpan.FromHours(8));
                     return new Signal { StrategyName = Name, Instrument = "NIFTY", Action = "BUY", Quantity = 50, OrderType = "MARKET", Price = lastCandle.Close, Priority = 3 };
                 }
             }
@@ -155,14 +155,14 @@ namespace StoicTrade.Api.Services.Strategies
             if (lastFast.Ema == null || lastSlow.Ema == null) return null;
 
             string stateKey = $"strategy_state_{config.Id}";
-            var currentState = await _redis.GetLockAsync(stateKey) ?? "Idle";
+            var currentState = await _redis.GetValueAsync(stateKey) ?? "Idle";
 
             // Uptrend: Fast > Slow. Pullback: Low dips below Fast EMA but closes above.
             if (currentState == "Idle" && lastFast.Ema > lastSlow.Ema)
             {
                 if (lastCandle.Low <= (decimal)lastFast.Ema && lastCandle.Close > (decimal)lastFast.Ema)
                 {
-                    await _redis.SetLockAsync(stateKey, "InPosition", TimeSpan.FromHours(8));
+                    await _redis.SetValueAsync(stateKey, "InPosition", TimeSpan.FromHours(8));
                     return new Signal { StrategyName = Name, Instrument = "NIFTY", Action = "BUY", Quantity = 50, OrderType = "MARKET", Price = lastCandle.Close, Priority = 1 };
                 }
             }
@@ -210,12 +210,12 @@ namespace StoicTrade.Api.Services.Strategies
             if (lastBb.UpperBand == null || lastBb.LowerBand == null) return null;
 
             string stateKey = $"strategy_state_{config.Id}";
-            var currentState = await _redis.GetLockAsync(stateKey) ?? "Idle";
+            var currentState = await _redis.GetValueAsync(stateKey) ?? "Idle";
 
             // Squeeze Breakout: Close crosses upper band
             if (currentState == "Idle" && lastCandle.Close > (decimal)lastBb.UpperBand)
             {
-                await _redis.SetLockAsync(stateKey, "InPosition", TimeSpan.FromHours(8));
+                await _redis.SetValueAsync(stateKey, "InPosition", TimeSpan.FromHours(8));
                 return new Signal { StrategyName = Name, Instrument = "NIFTY", Action = "BUY", Quantity = 50, OrderType = "MARKET", Price = lastCandle.Close, Priority = 2 };
             }
             else if (currentState == "InPosition" && lastCandle.Close < (decimal)lastBb.Sma)
@@ -248,7 +248,7 @@ namespace StoicTrade.Api.Services.Strategies
             if (candles.Count < 10) return null;
 
             string stateKey = $"strategy_state_{config.Id}";
-            var currentState = await _redis.GetLockAsync(stateKey) ?? "Idle";
+            var currentState = await _redis.GetValueAsync(stateKey) ?? "Idle";
 
             // NR7 logic
             var last7 = candles.Skip(candles.Count - 8).Take(7).ToList(); // Get previous 7 closed candles
@@ -262,7 +262,7 @@ namespace StoicTrade.Api.Services.Strategies
 
             if (currentState == "Idle" && isNr7 && currentCandle.Close > nr7High)
             {
-                await _redis.SetLockAsync(stateKey, "InPosition", TimeSpan.FromHours(8));
+                await _redis.SetValueAsync(stateKey, "InPosition", TimeSpan.FromHours(8));
                 return new Signal { StrategyName = Name, Instrument = "NIFTY", Action = "BUY", Quantity = 50, OrderType = "MARKET", Price = currentCandle.Close, Priority = 3 };
             }
             else if (currentState == "InPosition" && currentCandle.Close < nr7Low)
@@ -307,14 +307,14 @@ namespace StoicTrade.Api.Services.Strategies
             if (lastMacd.Macd == null || lastMacd.Signal == null || prevMacd.Macd == null) return null;
 
             string stateKey = $"strategy_state_{config.Id}";
-            var currentState = await _redis.GetLockAsync(stateKey) ?? "Idle";
+            var currentState = await _redis.GetValueAsync(stateKey) ?? "Idle";
 
             // Crossover above zero
             bool crossover = prevMacd.Macd < prevMacd.Signal && lastMacd.Macd > lastMacd.Signal;
 
             if (currentState == "Idle" && crossover && lastMacd.Macd < 0)
             {
-                await _redis.SetLockAsync(stateKey, "InPosition", TimeSpan.FromHours(8));
+                await _redis.SetValueAsync(stateKey, "InPosition", TimeSpan.FromHours(8));
                 return new Signal { StrategyName = Name, Instrument = "NIFTY", Action = "BUY", Quantity = 50, OrderType = "MARKET", Price = lastCandle.Close, Priority = 1 };
             }
             else if (currentState == "InPosition" && lastMacd.Macd < lastMacd.Signal)
