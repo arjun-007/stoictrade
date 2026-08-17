@@ -22,17 +22,10 @@ namespace StoicTrade.Api.Services
             _scopeFactory = scopeFactory;
         }
 
-        public async Task TriggerKillSequenceAsync(string accountId, string reason)
+        public async Task TriggerMasterKillSwitchAsync(string accountId, string reason)
         {
-            _logger.LogWarning("KILL SWITCH TRIGGERED for {AccountId}. Reason: {Reason}", accountId, reason);
+            _logger.LogWarning("MASTER KILL SWITCH TRIGGERED for {AccountId}. Reason: {Reason}", accountId, reason);
 
-            // 1. Fetch & cancel all pending orders via the Fyers API.
-            await _fyersApi.CancelAllPendingOrdersAsync(accountId);
-
-            // 2. Fetch all active positions & fire opposite market orders to square off.
-            await _fyersApi.SquareOffAllPositionsAsync(accountId);
-
-            // 3. Set the Redis kill_switch flag to LOCKED with the configured expiration.
             int shutdownMinutes = 720;
             using (var scope = _scopeFactory.CreateScope())
             {
@@ -44,9 +37,31 @@ namespace StoicTrade.Api.Services
                 }
             }
 
+            // Sets a lock that the RiskEngine uses to block all NEW orders
             await _redisService.SetValueAsync($"kill_switch:{accountId}", "LOCKED", TimeSpan.FromMinutes(shutdownMinutes));
             
-            _logger.LogWarning("Account {AccountId} is now LOCKED for {Minutes} minutes.", accountId, shutdownMinutes);
+            _logger.LogWarning("Account {AccountId} is now LOCKED for new orders for {Minutes} minutes.", accountId, shutdownMinutes);
+        }
+
+        public async Task EmergencySquareOffAsync(string accountId)
+        {
+            _logger.LogCritical("EMERGENCY SQUARE-OFF INITIATED for {AccountId}.", accountId);
+
+            // Set pending flag for idempotency
+            await _redisService.SetValueAsync($"emergency_squareoff_pending:{accountId}", "true", TimeSpan.FromMinutes(10));
+
+            // 1. Fetch & cancel all pending orders
+            await _fyersApi.CancelAllPendingOrdersAsync(accountId);
+
+            // 2. Fetch all active positions & fire opposite market orders to square off.
+            await _fyersApi.SquareOffAllPositionsAsync(accountId);
+
+            // 3. (In a real scenario, this would loop and verify positions = 0)
+            
+            // Clear pending flag
+            await _redisService.DeleteKeyAsync($"emergency_squareoff_pending:{accountId}");
+
+            _logger.LogInformation("Emergency square-off completed for {AccountId}.", accountId);
         }
         
         public async Task<bool> IsKillSwitchActiveAsync(string accountId)

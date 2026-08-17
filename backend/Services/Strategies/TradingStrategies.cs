@@ -15,7 +15,7 @@ namespace StoicTrade.Api.Services.Strategies
             _logger = logger;
         }
 
-        public async Task ExecuteAsync(StrategyConfig config, string marketData)
+        public async Task<Signal?> ExecuteAsync(StrategyConfig config, string marketData)
         {
             _logger.LogInformation("Evaluating {StrategyName} on {MarketData}", Name, marketData);
             // Logic:
@@ -23,6 +23,7 @@ namespace StoicTrade.Api.Services.Strategies
             // When candle closes above Supertrend line -> Market Buy ITM Call.
             // Hold until Per trade gain point or price closes below Supertrend line.
             await Task.CompletedTask;
+            return null; // Return signal when conditions met
         }
     }
 
@@ -37,13 +38,14 @@ namespace StoicTrade.Api.Services.Strategies
             _logger = logger;
         }
 
-        public async Task ExecuteAsync(StrategyConfig config, string marketData)
+        public async Task<Signal?> ExecuteAsync(StrategyConfig config, string marketData)
         {
             _logger.LogInformation("Evaluating {StrategyName} on {MarketData}", Name, marketData);
             // Logic:
             // Monitor High and Low of first 15-min candle.
             // If breaks High AND above VWAP -> Market Buy ITM Call.
             await Task.CompletedTask;
+            return null;
         }
     }
 
@@ -58,13 +60,14 @@ namespace StoicTrade.Api.Services.Strategies
             _logger = logger;
         }
 
-        public async Task ExecuteAsync(StrategyConfig config, string marketData)
+        public async Task<Signal?> ExecuteAsync(StrategyConfig config, string marketData)
         {
             _logger.LogInformation("Evaluating {StrategyName} on {MarketData}", Name, marketData);
             // Logic:
             // Track 9-EMA and 21-EMA on 5-min chart.
             // Wait for 9-EMA > 21-EMA. Wait for dip to 21-EMA and green confirmation candle.
             await Task.CompletedTask;
+            return null;
         }
     }
 
@@ -79,12 +82,13 @@ namespace StoicTrade.Api.Services.Strategies
             _logger = logger;
         }
 
-        public async Task ExecuteAsync(StrategyConfig config, string marketData)
+        public async Task<Signal?> ExecuteAsync(StrategyConfig config, string marketData)
         {
             _logger.LogInformation("Evaluating {StrategyName} on {MarketData}", Name, marketData);
             // Logic:
             // When upper/lower bands squeeze tight and close outside bands with high volume -> Execute trade.
             await Task.CompletedTask;
+            return null;
         }
     }
 
@@ -99,13 +103,14 @@ namespace StoicTrade.Api.Services.Strategies
             _logger = logger;
         }
 
-        public async Task ExecuteAsync(StrategyConfig config, string marketData)
+        public async Task<Signal?> ExecuteAsync(StrategyConfig config, string marketData)
         {
             _logger.LogInformation("Evaluating {StrategyName} on {MarketData}", Name, marketData);
             // Logic:
             // CurrentCandle.Range < Min(Previous 6 Candles Ranges).
             // Buy Stop just above High of NR7 candle.
             await Task.CompletedTask;
+            return null;
         }
     }
 
@@ -120,13 +125,14 @@ namespace StoicTrade.Api.Services.Strategies
             _logger = logger;
         }
 
-        public async Task ExecuteAsync(StrategyConfig config, string marketData)
+        public async Task<Signal?> ExecuteAsync(StrategyConfig config, string marketData)
         {
             _logger.LogInformation("Evaluating {StrategyName} on {MarketData}", Name, marketData);
             // Logic:
             // Calculate MACD(12, 26, 9). 
             // When MACD crosses above Signal line while both are below zero line -> Buy.
             await Task.CompletedTask;
+            return null;
         }
     }
 }

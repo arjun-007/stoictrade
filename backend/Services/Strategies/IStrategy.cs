@@ -6,6 +6,6 @@ namespace StoicTrade.Api.Services.Strategies
     public interface IStrategy
     {
         string Name { get; }
-        Task ExecuteAsync(StrategyConfig config, string marketData);
+        Task<Signal?> ExecuteAsync(StrategyConfig config, string marketData);
     }
 }

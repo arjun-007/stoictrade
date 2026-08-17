@@ -15,6 +15,8 @@ namespace StoicTrade.Api.Models
         public decimal VixMaxLimit { get; set; }
         public decimal PerTradeStopLossPoint { get; set; }
         public decimal PerTradeGainPoint { get; set; }
+        public TimeSpan TradingWindowStart { get; set; } = new TimeSpan(9, 30, 0);
+        public TimeSpan TradingWindowEnd { get; set; } = new TimeSpan(15, 10, 0);
         public string TradeMode { get; set; } = "Paper";
         public int KillSwitchShutdownMinutes { get; set; } = 720;
     }

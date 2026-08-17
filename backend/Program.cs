@@ -47,6 +47,8 @@ builder.Services.AddHostedService<StoicTrade.Api.Services.MarketData.FyersDataPo
 builder.Services.AddSingleton<StoicTrade.Api.Services.Strategies.OptionContractResolver>();
 builder.Services.AddSingleton<FyersApiService>();
 builder.Services.AddSingleton<KillSwitchService>();
+builder.Services.AddSingleton<StoicTrade.Api.Services.OrderManagementService>();
+builder.Services.AddSingleton<StoicTrade.Api.Services.RiskEngine>();
 
 // Configure Strategies
 builder.Services.AddSingleton<StoicTrade.Api.Services.Strategies.IStrategy, StoicTrade.Api.Services.Strategies.SupertrendStrategy>();
@@ -58,6 +60,7 @@ builder.Services.AddSingleton<StoicTrade.Api.Services.Strategies.IStrategy, Stoi
 
 // Register Strategy Engine Background Service
 builder.Services.AddHostedService<StoicTrade.Api.Services.Strategies.StrategyEngineService>();
+builder.Services.AddHostedService<StoicTrade.Api.Services.BrokerReconciliationService>();
 
 // Configure CORS for Next.js frontend
 var allowedOrigins = builder.Configuration["AllowedOrigins"]?.Split(',') ?? new[] { "http://localhost:3000", "https://stoictrade-production.up.railway.app", "https://www.stoictrade.in", "https://stoictrade.in" };
@@ -86,7 +89,6 @@ if (app.Environment.IsDevelopment())
 app.UseHttpsRedirection();
 app.UseCors("AllowFrontend");
 app.UseAuthentication();
-app.UseMiddleware<StoicTrade.Api.Middlewares.RmsMiddleware>();
 app.UseAuthorization();
 app.MapControllers();
 

@@ -18,8 +18,16 @@ namespace StoicTrade.Api.Controllers
         public async Task<IActionResult> Trigger([FromHeader(Name = "X-Account-Id")] string? accountIdHeader, [FromBody] TriggerRequest req)
         {
             var accountId = accountIdHeader ?? "default_account";
-            await _killSwitchService.TriggerKillSequenceAsync(accountId, req.Reason ?? "Manual Trigger");
-            return Ok(new { Message = "Kill switch triggered successfully." });
+            await _killSwitchService.TriggerMasterKillSwitchAsync(accountId, req.Reason ?? "Manual Trigger");
+            return Ok(new { Message = "Master kill switch triggered successfully." });
+        }
+
+        [HttpPost("square-off")]
+        public async Task<IActionResult> SquareOff([FromHeader(Name = "X-Account-Id")] string? accountIdHeader)
+        {
+            var accountId = accountIdHeader ?? "default_account";
+            await _killSwitchService.EmergencySquareOffAsync(accountId);
+            return Ok(new { Message = "Emergency square-off initiated." });
         }
 
         [HttpGet("status")]

@@ -30,23 +30,21 @@ namespace StoicTrade.Api.Services
             IsEngineRunning = false;
         }
 
-        public async Task<string> GetDailyAccessTokenAsync()
+        public string GetAuthUrl()
         {
-            if (!string.IsNullOrEmpty(_accessToken) && DateTime.UtcNow < _tokenExpiry)
-            {
-                return _accessToken;
-            }
+            var appId = _config["FYERS_APP_ID"];
+            var redirectUri = _config["FYERS_REDIRECT_URI"] ?? "https://localhost:5000";
+            return $"https://api-t1.fyers.in/api/v3/generate-authcode?client_id={appId}&redirect_uri={redirectUri}&response_type=code&state=None";
+        }
 
-            _logger.LogInformation("Fyers API: Fetching new daily access token via headless automation...");
+        public async Task<string> ValidateAuthCodeAsync(string authCode)
+        {
+            _logger.LogInformation("Fyers API: Validating auth code...");
             
             var appId = _config["FYERS_APP_ID"];
             var secretId = _config["FYERS_SECRET_ID"];
-            var redirectUri = _config["FYERS_REDIRECT_URI"] ?? "https://localhost:5000";
-            var fyersId = _config["FYERS_USER_ID"];
-            var totpSecret = _config["FYERS_TOTP_SECRET"];
-            var pin = _config["FYERS_PIN"];
-
-            if (string.IsNullOrEmpty(appId) || string.IsNullOrEmpty(secretId) || string.IsNullOrEmpty(fyersId) || string.IsNullOrEmpty(totpSecret))
+            
+            if (string.IsNullOrEmpty(appId) || string.IsNullOrEmpty(secretId))
             {
                 _logger.LogError("Fyers credentials missing in configuration.");
                 throw new Exception("Fyers credentials missing.");
@@ -54,52 +52,19 @@ namespace StoicTrade.Api.Services
 
             var appIdHash = GenerateSHA256Hash($"{appId}:{secretId}");
 
-            // Step 1: Send Login OTP Request (Vagator v2)
-            var sendOtpRes = await _httpClient.PostAsJsonAsync("https://api-t2.fyers.in/vagator/v2/send_login_otp_v2", new { fy_id = fyersId, app_id = 2 });
-            if (!sendOtpRes.IsSuccessStatusCode) 
-            {
-                var err = await sendOtpRes.Content.ReadAsStringAsync();
-                throw new Exception($"Fyers Login OTP Error: {sendOtpRes.StatusCode} - {err}");
-            }
-            var sendOtpData = await sendOtpRes.Content.ReadFromJsonAsync<JsonElement>();
-            var requestKey = sendOtpData.GetProperty("request_key").GetString();
-
-            // Step 2: Verify TOTP
-            var totpPin = GenerateTotpPin(totpSecret);
-            var verifyTotpRes = await _httpClient.PostAsJsonAsync("https://api-t2.fyers.in/vagator/v2/verify_totp", new { request_key = requestKey, totp = totpPin });
-            var verifyTotpData = await verifyTotpRes.Content.ReadFromJsonAsync<JsonElement>();
-            requestKey = verifyTotpData.GetProperty("request_key").GetString();
-
-            // Step 3: Verify PIN
-            var verifyPinRes = await _httpClient.PostAsJsonAsync("https://api-t2.fyers.in/vagator/v2/verify_pin_v2", new { request_key = requestKey, identity_type = "pin", identifier = pin });
-            var verifyPinData = await verifyPinRes.Content.ReadFromJsonAsync<JsonElement>();
-            var vagatorToken = verifyPinData.GetProperty("data").GetProperty("access_token").GetString();
-
-            // Step 4: Get Auth Code
-            _httpClient.DefaultRequestHeaders.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", vagatorToken);
-            var authCodeRes = await _httpClient.PostAsJsonAsync("https://api-t1.fyers.in/api/v3/token", new
-            {
-                fyers_id = fyersId,
-                app_id = appId,
-                redirect_uri = redirectUri,
-                appType = "100",
-                code_challenge = "",
-                state = "None",
-                scope = "",
-                nonce = "",
-                response_type = "code",
-                create_cookie = true
-            });
-            var authCodeData = await authCodeRes.Content.ReadFromJsonAsync<JsonElement>();
-            var authCode = authCodeData.GetProperty("Url").GetString()?.Split("auth_code=")[1].Split("&")[0];
-
-            // Step 5: Get Final Access Token
             var tokenRes = await _httpClient.PostAsJsonAsync("https://api-t1.fyers.in/api/v3/validate-authcode", new
             {
                 grant_type = "authorization_code",
                 appIdHash = appIdHash,
                 code = authCode
             });
+
+            if (!tokenRes.IsSuccessStatusCode) 
+            {
+                var err = await tokenRes.Content.ReadAsStringAsync();
+                throw new Exception($"Fyers Token Validation Error: {tokenRes.StatusCode} - {err}");
+            }
+
             var tokenData = await tokenRes.Content.ReadFromJsonAsync<JsonElement>();
             
             _accessToken = tokenData.GetProperty("access_token").GetString();
@@ -137,6 +102,21 @@ namespace StoicTrade.Api.Services
         {
             _logger.LogInformation("Fyers API: Disconnecting engine...");
             IsEngineRunning = false;
+        }
+
+        public async Task<System.Collections.Generic.List<object>> GetPositionsAsync()
+        {
+            // In reality, you would send a GET request to Fyers positions API here
+            await Task.Delay(50);
+            return new System.Collections.Generic.List<object>(); // return empty dummy list
+        }
+
+        public async Task PlaceOrderAsync(string instrument, string action, int quantity, decimal expectedPrice)
+        {
+            _logger.LogInformation("Fyers API: Placing {Action} order for {Quantity} of {Instrument} at {ExpectedPrice}", 
+                action, quantity, instrument, expectedPrice);
+            // In reality, you would send a POST request to Fyers order placement API here
+            await Task.Delay(100);
         }
 
         public async Task CancelAllPendingOrdersAsync(string accountId)

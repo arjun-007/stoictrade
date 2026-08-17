@@ -22,11 +22,18 @@ namespace StoicTrade.Api.Controllers
         }
 
         [HttpPost("start")]
-        public async Task<IActionResult> StartEngine()
+        public IActionResult StartEngine()
+        {
+            var authUrl = _fyersApi.GetAuthUrl();
+            return Ok(new { Message = "Please authenticate with Fyers to start the engine.", AuthUrl = authUrl });
+        }
+
+        [HttpPost("callback")]
+        public async Task<IActionResult> AuthCallback([FromBody] AuthCallbackRequest request)
         {
             try
             {
-                var token = await _fyersApi.GetDailyAccessTokenAsync();
+                var token = await _fyersApi.ValidateAuthCodeAsync(request.AuthCode);
                 return Ok(new { Message = "Engine started successfully. Connected to Fyers API.", Token = token });
             }
             catch (System.Exception ex)
@@ -41,5 +48,10 @@ namespace StoicTrade.Api.Controllers
             _fyersApi.Disconnect();
             return Ok(new { Message = "Engine stopped successfully." });
         }
+    }
+
+    public class AuthCallbackRequest
+    {
+        public string AuthCode { get; set; } = string.Empty;
     }
 }
