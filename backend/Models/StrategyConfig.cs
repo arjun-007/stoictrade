@@ -12,6 +12,9 @@ namespace StoicTrade.Api.Models
         
         public bool IsEnabled { get; set; }
         
+        // "Automatic", "ApprovalRequired", "SignalOnly"
+        public string OperatingMode { get; set; } = "ApprovalRequired";
+        
         // Strategy parameters
         public decimal PerTradeStopLossPoint { get; set; }
         public decimal PerTradeGainPoint { get; set; }

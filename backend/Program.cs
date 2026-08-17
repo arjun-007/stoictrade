@@ -44,7 +44,7 @@ builder.Services.AddDbContext<AppDbContext>(options =>
 builder.Services.AddSingleton<RedisService>();
 builder.Services.AddSingleton<StoicTrade.Api.Services.MarketData.MarketDataCache>();
 builder.Services.AddHostedService<StoicTrade.Api.Services.MarketData.FyersDataPollingService>();
-builder.Services.AddSingleton<StoicTrade.Api.Services.Strategies.OptionContractResolver>();
+builder.Services.AddSingleton<StoicTrade.Api.Services.Strategies.OptionSelectionEngine>();
 builder.Services.AddSingleton<FyersApiService>();
 builder.Services.AddSingleton<KillSwitchService>();
 builder.Services.AddSingleton<StoicTrade.Api.Services.OrderManagementService>();
@@ -57,6 +57,8 @@ builder.Services.AddSingleton<StoicTrade.Api.Services.Strategies.IStrategy, Stoi
 builder.Services.AddSingleton<StoicTrade.Api.Services.Strategies.IStrategy, StoicTrade.Api.Services.Strategies.BollingerSqueezeStrategy>();
 builder.Services.AddSingleton<StoicTrade.Api.Services.Strategies.IStrategy, StoicTrade.Api.Services.Strategies.Nr7Strategy>();
 builder.Services.AddSingleton<StoicTrade.Api.Services.Strategies.IStrategy, StoicTrade.Api.Services.Strategies.MacdStrategy>();
+
+builder.Services.AddSingleton<StoicTrade.Api.Services.Strategies.SignalAggregatorService>();
 
 // Register Strategy Engine Background Service
 builder.Services.AddHostedService<StoicTrade.Api.Services.Strategies.StrategyEngineService>();
@@ -103,10 +105,13 @@ using (var scope = app.Services.CreateScope())
         dbContext.Database.ExecuteSqlRaw("ALTER TABLE GlobalSettings ADD COLUMN TradingWindowStart TEXT DEFAULT '09:30:00'");
         dbContext.Database.ExecuteSqlRaw("ALTER TABLE GlobalSettings ADD COLUMN TradingWindowEnd TEXT DEFAULT '15:10:00'");
     } 
-    catch 
+    catch {}
+
+    try
     {
-        // Columns probably already exist, ignore exception
+        dbContext.Database.ExecuteSqlRaw("ALTER TABLE StrategyConfigs ADD COLUMN OperatingMode TEXT DEFAULT 'ApprovalRequired'");
     }
+    catch {}
 }
 
 app.Run();

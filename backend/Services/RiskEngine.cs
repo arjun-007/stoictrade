@@ -79,7 +79,27 @@ namespace StoicTrade.Api.Services
                 return false;
             }
 
-            // If all checks pass:
+            // 5. Check Operating Mode
+            var strategyConfig = dbContext.StrategyConfigs.FirstOrDefault(s => s.StrategyName == signal.StrategyName);
+            if (strategyConfig != null)
+            {
+                if (strategyConfig.OperatingMode == "SignalOnly")
+                {
+                    _logger.LogInformation("RiskEngine: Mode is SignalOnly. Logging signal but not executing.");
+                    return true;
+                }
+                
+                if (strategyConfig.OperatingMode == "ApprovalRequired")
+                {
+                    _logger.LogInformation("RiskEngine: Mode is ApprovalRequired. Holding signal for manual approval.");
+                    var pendingSignalId = Guid.NewGuid().ToString();
+                    var pendingSignalJson = System.Text.Json.JsonSerializer.Serialize(signal);
+                    await _redisService.SetValueAsync($"pending_approval:{accountId}:{pendingSignalId}", pendingSignalJson, TimeSpan.FromMinutes(10));
+                    return true;
+                }
+            }
+
+            // If all checks pass and mode is Automatic:
             _logger.LogInformation("RiskEngine: Signal APPROVED. Passing to Order Manager.");
             await _orderManager.ExecuteOrderAsync(signal);
             return true;

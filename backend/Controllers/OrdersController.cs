@@ -19,7 +19,7 @@ namespace StoicTrade.Api.Controllers
             var settings = await Microsoft.EntityFrameworkCore.EntityFrameworkQueryableExtensions.FirstOrDefaultAsync(dbContext.GlobalSettings);
             if (settings != null && settings.TradeMode == "Paper")
             {
-                var resolver = HttpContext.RequestServices.GetRequiredService<StoicTrade.Api.Services.Strategies.OptionContractResolver>();
+                var resolver = HttpContext.RequestServices.GetRequiredService<StoicTrade.Api.Services.Strategies.OptionSelectionEngine>();
                 var ltp = resolver.ResolveOptionLtp(request.Instrument) ?? 0m;
                 
                 var trade = new StoicTrade.Api.Models.TradeLog

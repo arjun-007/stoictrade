@@ -89,5 +89,36 @@ namespace StoicTrade.Api.Services
             if (_fallbackCache.TryGetValue(key, out var item) && item.Expiry > DateTime.UtcNow) return item.Value == "LOCKED";
             return false; 
         }
+
+        public async Task<IEnumerable<string>> GetKeysByPrefixAsync(string prefix)
+        {
+            var keys = new List<string>();
+            if (IsRedisAvailable)
+            {
+                try
+                {
+                    // For StackExchange.Redis we need IServer to get keys
+                    var endpoints = _redis.GetEndPoints();
+                    var server = _redis.GetServer(endpoints[0]);
+                    foreach (var key in server.Keys(pattern: prefix + "*"))
+                    {
+                        keys.Add(key);
+                    }
+                    return keys;
+                }
+                catch { }
+            }
+
+            // Fallback
+            var now = DateTime.UtcNow;
+            foreach (var kvp in _fallbackCache)
+            {
+                if (kvp.Key.StartsWith(prefix) && kvp.Value.Expiry > now)
+                {
+                    keys.Add(kvp.Key);
+                }
+            }
+            return keys;
+        }
     }
 }
