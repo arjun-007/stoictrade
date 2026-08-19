@@ -161,7 +161,7 @@ namespace StoicTrade.Api.Services
             var url = $"https://api-t1.fyers.in/api/v3/history/?symbol={symbol}&resolution={resolution}&date_format=0&range_from={fromEpoch}&range_to={toEpoch}";
 
             var request = new HttpRequestMessage(HttpMethod.Get, url);
-            request.Headers.Add("Authorization", $"{_config["FYERS_APP_ID"]}:{_accessToken}"); // Fyers Auth format: AppId:AccessToken
+            request.Headers.TryAddWithoutValidation("Authorization", $"{_config["FYERS_APP_ID"]}:{_accessToken}"); // Fyers Auth format: AppId:AccessToken
 
             var response = await _httpClient.SendAsync(request);
             if (!response.IsSuccessStatusCode)

@@ -59,7 +59,7 @@ namespace StoicTrade.Api.Services.MarketData
                     }
 
                     _httpClient.DefaultRequestHeaders.Clear();
-                    _httpClient.DefaultRequestHeaders.Add("Authorization", $"{_config["FYERS_APP_ID"]}:{token}");
+                    _httpClient.DefaultRequestHeaders.TryAddWithoutValidation("Authorization", $"{_config["FYERS_APP_ID"]}:{token}");
 
                     // 2. We need NIFTY Spot to know which strikes to query. 
                     // First fetch just the spot price.
