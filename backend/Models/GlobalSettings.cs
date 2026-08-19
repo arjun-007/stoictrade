@@ -19,5 +19,6 @@ namespace StoicTrade.Api.Models
         public TimeSpan TradingWindowEnd { get; set; } = new TimeSpan(15, 10, 0);
         public string TradeMode { get; set; } = "Paper";
         public int KillSwitchShutdownMinutes { get; set; } = 720;
+        public int AutoTradeLots { get; set; } = 1;
     }
 }

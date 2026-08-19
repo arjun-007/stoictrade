@@ -80,6 +80,12 @@ namespace StoicTrade.Api.Services.Strategies
                     var riskEngine = scope.ServiceProvider.GetRequiredService<StoicTrade.Api.Services.RiskEngine>();
                     foreach (var signal in aggregatedSignals)
                     {
+                        if (globalSettings != null)
+                        {
+                            // Multiply the base quantity (65) by AutoTradeLots (default 1)
+                            signal.Quantity = 65 * Math.Max(1, globalSettings.AutoTradeLots);
+                        }
+                        
                         await riskEngine.EvaluateAndExecuteAsync(signal);
                     }
                 }

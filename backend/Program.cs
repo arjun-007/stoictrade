@@ -115,6 +115,12 @@ using (var scope = app.Services.CreateScope())
         dbContext.Database.ExecuteSqlRaw("ALTER TABLE StrategyConfigs ADD COLUMN OperatingMode TEXT DEFAULT 'ApprovalRequired'");
     }
     catch {}
+
+    try
+    {
+        dbContext.Database.ExecuteSqlRaw("ALTER TABLE GlobalSettings ADD COLUMN AutoTradeLots INTEGER DEFAULT 1");
+    }
+    catch {}
 }
 
 app.Run();

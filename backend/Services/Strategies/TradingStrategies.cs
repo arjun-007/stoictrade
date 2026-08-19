@@ -45,12 +45,12 @@ namespace StoicTrade.Api.Services.Strategies
             if (currentState == "Idle" && lastCandle.Close > (decimal)lastSt.SuperTrend)
             {
                 await _redis.SetValueAsync(stateKey, "InPosition", TimeSpan.FromHours(8));
-                return new Signal { StrategyName = Name, Instrument = "NIFTY", Action = "BUY", Quantity = 50, OrderType = "MARKET", Price = lastCandle.Close, Priority = 2 };
+                return new Signal { StrategyName = Name, Instrument = "NIFTY", Action = "BUY", Quantity = 65, OrderType = "MARKET", Price = lastCandle.Close, Priority = 2 };
             }
             else if (currentState == "InPosition" && lastCandle.Close < (decimal)lastSt.SuperTrend)
             {
                 await _redis.DeleteKeyAsync(stateKey);
-                return new Signal { StrategyName = Name, Instrument = "NIFTY", Action = "SELL", Quantity = 50, OrderType = "MARKET", Price = lastCandle.Close, Priority = 2 };
+                return new Signal { StrategyName = Name, Instrument = "NIFTY", Action = "SELL", Quantity = 65, OrderType = "MARKET", Price = lastCandle.Close, Priority = 2 };
             }
             return null;
         }
@@ -105,7 +105,7 @@ namespace StoicTrade.Api.Services.Strategies
                 if (lastCandle.Close > orbHigh && (!useVwap || lastCandle.Close > vwap))
                 {
                     await _redis.SetValueAsync(stateKey, "InPosition_Long", TimeSpan.FromHours(8));
-                    return new Signal { StrategyName = Name, Instrument = "NIFTY", Action = "BUY", Quantity = 50, OrderType = "MARKET", Price = lastCandle.Close, Priority = 3 };
+                    return new Signal { StrategyName = Name, Instrument = "NIFTY", Action = "BUY", Quantity = 65, OrderType = "MARKET", Price = lastCandle.Close, Priority = 3 };
                 }
             }
             else if (currentState == "InPosition_Long")
@@ -114,7 +114,7 @@ namespace StoicTrade.Api.Services.Strategies
                 if (lastCandle.Close < orbLow)
                 {
                     await _redis.DeleteKeyAsync(stateKey);
-                    return new Signal { StrategyName = Name, Instrument = "NIFTY", Action = "SELL", Quantity = 50, OrderType = "MARKET", Price = lastCandle.Close, Priority = 3 };
+                    return new Signal { StrategyName = Name, Instrument = "NIFTY", Action = "SELL", Quantity = 65, OrderType = "MARKET", Price = lastCandle.Close, Priority = 3 };
                 }
             }
             return null;
@@ -163,7 +163,7 @@ namespace StoicTrade.Api.Services.Strategies
                 if (lastCandle.Low <= (decimal)lastFast.Ema && lastCandle.Close > (decimal)lastFast.Ema)
                 {
                     await _redis.SetValueAsync(stateKey, "InPosition", TimeSpan.FromHours(8));
-                    return new Signal { StrategyName = Name, Instrument = "NIFTY", Action = "BUY", Quantity = 50, OrderType = "MARKET", Price = lastCandle.Close, Priority = 1 };
+                    return new Signal { StrategyName = Name, Instrument = "NIFTY", Action = "BUY", Quantity = 65, OrderType = "MARKET", Price = lastCandle.Close, Priority = 1 };
                 }
             }
             else if (currentState == "InPosition")
@@ -172,7 +172,7 @@ namespace StoicTrade.Api.Services.Strategies
                 if (lastCandle.Close < (decimal)lastSlow.Ema)
                 {
                     await _redis.DeleteKeyAsync(stateKey);
-                    return new Signal { StrategyName = Name, Instrument = "NIFTY", Action = "SELL", Quantity = 50, OrderType = "MARKET", Price = lastCandle.Close, Priority = 1 };
+                    return new Signal { StrategyName = Name, Instrument = "NIFTY", Action = "SELL", Quantity = 65, OrderType = "MARKET", Price = lastCandle.Close, Priority = 1 };
                 }
             }
             return null;
@@ -216,12 +216,12 @@ namespace StoicTrade.Api.Services.Strategies
             if (currentState == "Idle" && lastCandle.Close > (decimal)lastBb.UpperBand)
             {
                 await _redis.SetValueAsync(stateKey, "InPosition", TimeSpan.FromHours(8));
-                return new Signal { StrategyName = Name, Instrument = "NIFTY", Action = "BUY", Quantity = 50, OrderType = "MARKET", Price = lastCandle.Close, Priority = 2 };
+                return new Signal { StrategyName = Name, Instrument = "NIFTY", Action = "BUY", Quantity = 65, OrderType = "MARKET", Price = lastCandle.Close, Priority = 2 };
             }
             else if (currentState == "InPosition" && lastCandle.Close < (decimal)lastBb.Sma)
             {
                 await _redis.DeleteKeyAsync(stateKey);
-                return new Signal { StrategyName = Name, Instrument = "NIFTY", Action = "SELL", Quantity = 50, OrderType = "MARKET", Price = lastCandle.Close, Priority = 2 };
+                return new Signal { StrategyName = Name, Instrument = "NIFTY", Action = "SELL", Quantity = 65, OrderType = "MARKET", Price = lastCandle.Close, Priority = 2 };
             }
             return null;
         }
@@ -263,12 +263,12 @@ namespace StoicTrade.Api.Services.Strategies
             if (currentState == "Idle" && isNr7 && currentCandle.Close > nr7High)
             {
                 await _redis.SetValueAsync(stateKey, "InPosition", TimeSpan.FromHours(8));
-                return new Signal { StrategyName = Name, Instrument = "NIFTY", Action = "BUY", Quantity = 50, OrderType = "MARKET", Price = currentCandle.Close, Priority = 3 };
+                return new Signal { StrategyName = Name, Instrument = "NIFTY", Action = "BUY", Quantity = 65, OrderType = "MARKET", Price = currentCandle.Close, Priority = 3 };
             }
             else if (currentState == "InPosition" && currentCandle.Close < nr7Low)
             {
                 await _redis.DeleteKeyAsync(stateKey);
-                return new Signal { StrategyName = Name, Instrument = "NIFTY", Action = "SELL", Quantity = 50, OrderType = "MARKET", Price = currentCandle.Close, Priority = 3 };
+                return new Signal { StrategyName = Name, Instrument = "NIFTY", Action = "SELL", Quantity = 65, OrderType = "MARKET", Price = currentCandle.Close, Priority = 3 };
             }
             return null;
         }
@@ -315,12 +315,12 @@ namespace StoicTrade.Api.Services.Strategies
             if (currentState == "Idle" && crossover && lastMacd.Macd < 0)
             {
                 await _redis.SetValueAsync(stateKey, "InPosition", TimeSpan.FromHours(8));
-                return new Signal { StrategyName = Name, Instrument = "NIFTY", Action = "BUY", Quantity = 50, OrderType = "MARKET", Price = lastCandle.Close, Priority = 1 };
+                return new Signal { StrategyName = Name, Instrument = "NIFTY", Action = "BUY", Quantity = 65, OrderType = "MARKET", Price = lastCandle.Close, Priority = 1 };
             }
             else if (currentState == "InPosition" && lastMacd.Macd < lastMacd.Signal)
             {
                 await _redis.DeleteKeyAsync(stateKey);
-                return new Signal { StrategyName = Name, Instrument = "NIFTY", Action = "SELL", Quantity = 50, OrderType = "MARKET", Price = lastCandle.Close, Priority = 1 };
+                return new Signal { StrategyName = Name, Instrument = "NIFTY", Action = "SELL", Quantity = 65, OrderType = "MARKET", Price = lastCandle.Close, Priority = 1 };
             }
             return null;
         }

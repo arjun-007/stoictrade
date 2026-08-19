@@ -15,6 +15,7 @@ interface GlobalSettings {
   perTradeGainPoint: number;
   tradeMode: string;
   killSwitchShutdownMinutes: number;
+  autoTradeLots: number;
 }
 
 export default function SettingsPage() {
@@ -145,6 +146,16 @@ export default function SettingsPage() {
         <section>
           <h2 className="text-xl font-bold mb-4 pb-2 border-b border-slate-100 dark:border-slate-800">Trade Execution Limits</h2>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            <div>
+              <label className="block text-sm font-semibold text-slate-700 dark:text-slate-300 mb-2">Auto Trade Lot(s)</label>
+              <input 
+                type="number" 
+                value={settings.autoTradeLots}
+                onChange={e => handleChange('autoTradeLots', Number(e.target.value))}
+                className="w-full px-4 py-3 rounded-xl border border-slate-200 dark:border-slate-700 bg-transparent focus:ring-2 focus:ring-primary outline-none"
+              />
+              <p className="text-xs text-slate-500 mt-1">Number of lots to execute per trade (multiplied by 65).</p>
+            </div>
             <div>
               <label className="block text-sm font-semibold text-slate-700 dark:text-slate-300 mb-2">Max Trades Per Day</label>
               <input 
