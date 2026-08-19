@@ -126,8 +126,9 @@ export default function Dashboard() {
       const data = await res.json();
       
       if (res.ok) {
-        if (data.authUrl) {
-          window.location.href = data.authUrl;
+        const redirectUrl = data.authUrl || data.AuthUrl;
+        if (redirectUrl) {
+          window.location.href = redirectUrl;
         } else {
           setIsEngineRunning(!isEngineRunning);
         }
