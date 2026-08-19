@@ -20,9 +20,9 @@ export default function Dashboard() {
   ]);
 
   const [portfolioSummary, setPortfolioSummary] = useState({
-    AvailableMargin: 0,
-    DailyPnL: 0,
-    ActivePositionsCount: 0
+    availableMargin: 0,
+    dailyPnL: 0,
+    activePositionsCount: 0
   });
 
   useEffect(() => {
@@ -214,12 +214,12 @@ export default function Dashboard() {
         <div className="bg-surface p-6 rounded-2xl shadow-sm border border-slate-100 dark:border-slate-800">
           <div className="flex items-center justify-between">
             <h3 className="text-slate-500 font-medium">Daily P&L</h3>
-            <div className={`p-2 rounded-lg ${portfolioSummary.DailyPnL >= 0 ? "bg-green-100 dark:bg-green-900/30 text-green-600" : "bg-red-100 dark:bg-red-900/30 text-danger"}`}>
-              {portfolioSummary.DailyPnL >= 0 ? <TrendingUp className="w-5 h-5" /> : <TrendingDown className="w-5 h-5" />}
+            <div className={`p-2 rounded-lg ${portfolioSummary.dailyPnL >= 0 ? "bg-green-100 dark:bg-green-900/30 text-green-600" : "bg-red-100 dark:bg-red-900/30 text-danger"}`}>
+              {portfolioSummary.dailyPnL >= 0 ? <TrendingUp className="w-5 h-5" /> : <TrendingDown className="w-5 h-5" />}
             </div>
           </div>
-          <p className={`text-3xl font-bold mt-4 ${portfolioSummary.DailyPnL >= 0 ? "text-green-500" : "text-danger"}`}>
-            {portfolioSummary.DailyPnL >= 0 ? "+" : ""}₹ {Math.abs(portfolioSummary.DailyPnL).toFixed(2)}
+          <p className={`text-3xl font-bold mt-4 ${portfolioSummary.dailyPnL >= 0 ? "text-green-500" : "text-danger"}`}>
+            {portfolioSummary.dailyPnL >= 0 ? "+" : ""}₹ {Math.abs(portfolioSummary.dailyPnL || 0).toFixed(2)}
           </p>
         </div>
         
@@ -230,7 +230,7 @@ export default function Dashboard() {
               <DollarSign className="w-5 h-5" />
             </div>
           </div>
-          <p className="text-3xl font-bold mt-4 text-slate-900 dark:text-white">₹ {portfolioSummary.AvailableMargin.toFixed(2)}</p>
+          <p className="text-3xl font-bold mt-4 text-slate-900 dark:text-white">₹ {(portfolioSummary.availableMargin || 0).toFixed(2)}</p>
         </div>
 
         <div className="bg-surface p-6 rounded-2xl shadow-sm border border-slate-100 dark:border-slate-800">
@@ -240,7 +240,7 @@ export default function Dashboard() {
               <Briefcase className="w-5 h-5" />
             </div>
           </div>
-          <p className="text-3xl font-bold mt-4 text-slate-900 dark:text-white">{portfolioSummary.ActivePositionsCount}</p>
+          <p className="text-3xl font-bold mt-4 text-slate-900 dark:text-white">{portfolioSummary.activePositionsCount || 0}</p>
         </div>
       </div>
 
