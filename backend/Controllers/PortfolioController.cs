@@ -1,8 +1,13 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using StoicTrade.Api.Services;
+using StoicTrade.Api.Data;
+using StoicTrade.Api.Services.MarketData;
 using System.Text.Json;
 using System.Threading.Tasks;
+using System.Linq;
+using System.Collections.Generic;
+using System;
 
 namespace StoicTrade.Api.Controllers
 {
@@ -12,15 +17,71 @@ namespace StoicTrade.Api.Controllers
     public class PortfolioController : ControllerBase
     {
         private readonly FyersApiService _fyersApi;
+        private readonly AppDbContext _dbContext;
+        private readonly MarketDataCache _marketDataCache;
 
-        public PortfolioController(FyersApiService fyersApi)
+        public PortfolioController(FyersApiService fyersApi, AppDbContext dbContext, MarketDataCache marketDataCache)
         {
             _fyersApi = fyersApi;
+            _dbContext = dbContext;
+            _marketDataCache = marketDataCache;
+        }
+
+        private bool IsPaperMode()
+        {
+            var globalSettings = _dbContext.GlobalSettings.FirstOrDefault();
+            return globalSettings != null && globalSettings.TradeMode == "Paper";
+        }
+
+        private (decimal totalPnL, int activeCount, List<object> mockNetPositions) GetMockPaperData()
+        {
+            var paperPositions = _dbContext.PaperPositions.ToList();
+            var netPositions = new List<object>();
+            decimal totalPnL = 0;
+            int activePositionsCount = 0;
+
+            foreach (var pos in paperPositions)
+            {
+                // Default to last trade price if market data not available for PnL
+                decimal ltp = _marketDataCache.GetSpotData(pos.Symbol)?.Price ?? (pos.NetQty > 0 ? pos.BuyAvg : pos.SellAvg);
+                decimal unrealized = 0;
+                
+                if (pos.NetQty > 0) unrealized = (ltp - pos.BuyAvg) * pos.NetQty;
+                else if (pos.NetQty < 0) unrealized = (pos.SellAvg - ltp) * Math.Abs(pos.NetQty);
+
+                netPositions.Add(new {
+                    symbol = pos.Symbol,
+                    netQty = pos.NetQty,
+                    buyAvg = pos.BuyAvg,
+                    sellAvg = pos.SellAvg,
+                    realized_profit = pos.RealizedProfit,
+                    unrealized_profit = unrealized,
+                    pl = pos.RealizedProfit + unrealized,
+                    slNo = 1,
+                    id = pos.Id
+                });
+
+                totalPnL += (pos.RealizedProfit + unrealized);
+                if (pos.NetQty != 0) activePositionsCount++;
+            }
+
+            return (totalPnL, activePositionsCount, netPositions);
         }
 
         [HttpGet("summary")]
         public async Task<IActionResult> GetSummary()
         {
+            if (IsPaperMode())
+            {
+                var mockData = GetMockPaperData();
+                return Ok(new
+                {
+                    AvailableMargin = 1000000.00m, // Dummy fixed paper margin
+                    DailyPnL = mockData.totalPnL,
+                    ActivePositionsCount = mockData.activeCount
+                });
+            }
+
             var funds = await _fyersApi.GetFundsAsync();
             var positions = await _fyersApi.GetPositionsAsync();
             
@@ -64,6 +125,12 @@ namespace StoicTrade.Api.Controllers
         [HttpGet("positions")]
         public async Task<IActionResult> GetPositions()
         {
+            if (IsPaperMode())
+            {
+                var mockData = GetMockPaperData();
+                return Ok(new { netPositions = mockData.mockNetPositions });
+            }
+
             var positions = await _fyersApi.GetPositionsAsync();
             if (positions.ValueKind != JsonValueKind.Undefined)
             {
@@ -75,6 +142,11 @@ namespace StoicTrade.Api.Controllers
         [HttpGet("holdings")]
         public async Task<IActionResult> GetHoldings()
         {
+            if (IsPaperMode())
+            {
+                return Ok(new { holdings = new List<object>() }); // Return empty for paper holdings
+            }
+
             var holdings = await _fyersApi.GetHoldingsAsync();
             if (holdings.ValueKind != JsonValueKind.Undefined)
             {

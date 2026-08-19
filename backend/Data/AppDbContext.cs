@@ -12,6 +12,7 @@ namespace StoicTrade.Api.Data
         public DbSet<StrategyConfig> StrategyConfigs { get; set; }
         public DbSet<TradeLog> TradeLogs { get; set; }
         public DbSet<GlobalSettings> GlobalSettings { get; set; }
+        public DbSet<PaperPosition> PaperPositions { get; set; }
 
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {

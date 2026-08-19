@@ -121,6 +121,26 @@ using (var scope = app.Services.CreateScope())
         dbContext.Database.ExecuteSqlRaw("ALTER TABLE GlobalSettings ADD COLUMN AutoTradeLots INTEGER DEFAULT 1");
     }
     catch {}
+
+    try
+    {
+        dbContext.Database.ExecuteSqlRaw(@"
+            CREATE TABLE IF NOT EXISTS PaperPositions (
+                Id TEXT PRIMARY KEY,
+                Symbol TEXT NOT NULL,
+                NetQty INTEGER NOT NULL,
+                BuyAvg TEXT NOT NULL,
+                SellAvg TEXT NOT NULL,
+                RealizedProfit TEXT NOT NULL,
+                TotalBuyQty INTEGER NOT NULL,
+                TotalSellQty INTEGER NOT NULL,
+                TotalBuyValue TEXT NOT NULL,
+                TotalSellValue TEXT NOT NULL,
+                CreatedAt TEXT NOT NULL,
+                UpdatedAt TEXT NOT NULL
+            )");
+    }
+    catch {}
 }
 
 app.Run();
