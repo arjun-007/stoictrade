@@ -168,22 +168,26 @@ namespace StoicTrade.Api.Services.MarketData
 
             foreach (var item in dataArray.EnumerateArray())
             {
+                if (item.TryGetProperty("s", out var sProp) && sProp.GetString() == "error") continue;
+
                 var v = item.GetProperty("v");
                 if (v.ValueKind == JsonValueKind.Null) continue;
 
-                var symbol = v.GetProperty("short_name").GetString();
-                if (symbol == "NIFTY50-INDEX") continue;
+                if (!v.TryGetProperty("short_name", out var shortNameProp)) continue;
+                var symbol = shortNameProp.GetString();
+                if (symbol == "NIFTY50-INDEX" || string.IsNullOrEmpty(symbol)) continue;
 
                 // Parse symbol NSE:NIFTY26AUG22000CE
                 try
                 {
-                    if (string.IsNullOrEmpty(symbol)) continue;
-                    
                     var strikeStr = new string(symbol.Where(char.IsDigit).ToArray()).Substring(2); // Skip year
                     int strike = int.Parse(strikeStr);
                     string type = symbol.EndsWith("CE") ? "CE" : "PE";
-                    decimal lp = v.GetProperty("lp").GetDecimal();
-                    decimal change = v.GetProperty("chp").GetDecimal();
+                    
+                    if (!v.TryGetProperty("lp", out var lpProp) || !v.TryGetProperty("chp", out var chpProp)) continue;
+                    
+                    decimal lp = lpProp.GetDecimal();
+                    decimal change = chpProp.GetDecimal();
 
                     if (!strikesMap.ContainsKey(strike))
                         strikesMap[strike] = new Dictionary<string, object>();
