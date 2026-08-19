@@ -19,7 +19,25 @@ export default function Dashboard() {
     { id: '2', symbol: 'HDFCBANK-EQ', qty: 100, pnl: -450, selected: true }
   ]);
 
+  const [portfolioSummary, setPortfolioSummary] = useState({
+    AvailableMargin: 0,
+    DailyPnL: 0,
+    ActivePositionsCount: 0
+  });
+
   useEffect(() => {
+    const fetchPortfolio = async () => {
+      try {
+        const res = await fetchWithAuth("/api/portfolio/summary");
+        if (res.ok) {
+          const data = await res.json();
+          setPortfolioSummary(data);
+        }
+      } catch (err) {
+        console.error("Failed to fetch portfolio summary", err);
+      }
+    };
+    
     // Check initial kill switch status
     fetchWithAuth("/api/killswitch/status")
       .then((res) => res.json())
@@ -58,6 +76,11 @@ export default function Dashboard() {
       })
       .catch(err => console.error("Failed to handle auth callback", err));
     }
+
+    fetchPortfolio();
+    const portfolioInterval = setInterval(fetchPortfolio, 5000);
+
+    return () => clearInterval(portfolioInterval);
   }, []);
 
   const handleKillSwitch = () => {
@@ -191,11 +214,13 @@ export default function Dashboard() {
         <div className="bg-surface p-6 rounded-2xl shadow-sm border border-slate-100 dark:border-slate-800">
           <div className="flex items-center justify-between">
             <h3 className="text-slate-500 font-medium">Daily P&L</h3>
-            <div className="p-2 bg-green-100 dark:bg-green-900/30 text-green-600 rounded-lg">
-              <TrendingUp className="w-5 h-5" />
+            <div className={`p-2 rounded-lg ${portfolioSummary.DailyPnL >= 0 ? "bg-green-100 dark:bg-green-900/30 text-green-600" : "bg-red-100 dark:bg-red-900/30 text-danger"}`}>
+              {portfolioSummary.DailyPnL >= 0 ? <TrendingUp className="w-5 h-5" /> : <TrendingDown className="w-5 h-5" />}
             </div>
           </div>
-          <p className="text-3xl font-bold mt-4 text-green-500">+₹ 14,250</p>
+          <p className={`text-3xl font-bold mt-4 ${portfolioSummary.DailyPnL >= 0 ? "text-green-500" : "text-danger"}`}>
+            {portfolioSummary.DailyPnL >= 0 ? "+" : ""}₹ {Math.abs(portfolioSummary.DailyPnL).toFixed(2)}
+          </p>
         </div>
         
         <div className="bg-surface p-6 rounded-2xl shadow-sm border border-slate-100 dark:border-slate-800">
@@ -205,7 +230,7 @@ export default function Dashboard() {
               <DollarSign className="w-5 h-5" />
             </div>
           </div>
-          <p className="text-3xl font-bold mt-4 text-slate-900 dark:text-white">₹ 4,50,000</p>
+          <p className="text-3xl font-bold mt-4 text-slate-900 dark:text-white">₹ {portfolioSummary.AvailableMargin.toFixed(2)}</p>
         </div>
 
         <div className="bg-surface p-6 rounded-2xl shadow-sm border border-slate-100 dark:border-slate-800">
@@ -215,7 +240,7 @@ export default function Dashboard() {
               <Briefcase className="w-5 h-5" />
             </div>
           </div>
-          <p className="text-3xl font-bold mt-4 text-slate-900 dark:text-white">2</p>
+          <p className="text-3xl font-bold mt-4 text-slate-900 dark:text-white">{portfolioSummary.ActivePositionsCount}</p>
         </div>
       </div>
 

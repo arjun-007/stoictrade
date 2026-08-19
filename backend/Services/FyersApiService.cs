@@ -106,11 +106,52 @@ namespace StoicTrade.Api.Services
             IsEngineRunning = false;
         }
 
-        public async Task<System.Collections.Generic.List<object>> GetPositionsAsync()
+        public async Task<JsonElement> GetFundsAsync()
         {
-            // In reality, you would send a GET request to Fyers positions API here
-            await Task.Delay(50);
-            return new System.Collections.Generic.List<object>(); // return empty dummy list
+            if (string.IsNullOrEmpty(_accessToken)) return default;
+            
+            var request = new HttpRequestMessage(HttpMethod.Get, "https://api-t1.fyers.in/api/v3/funds");
+            request.Headers.TryAddWithoutValidation("Authorization", $"{_config["FYERS_APP_ID"]}:{_accessToken}");
+            
+            var response = await _httpClient.SendAsync(request);
+            if (response.IsSuccessStatusCode)
+            {
+                var content = await response.Content.ReadAsStringAsync();
+                return JsonDocument.Parse(content).RootElement;
+            }
+            return default;
+        }
+
+        public async Task<JsonElement> GetPositionsAsync()
+        {
+            if (string.IsNullOrEmpty(_accessToken)) return default;
+            
+            var request = new HttpRequestMessage(HttpMethod.Get, "https://api-t1.fyers.in/api/v3/positions");
+            request.Headers.TryAddWithoutValidation("Authorization", $"{_config["FYERS_APP_ID"]}:{_accessToken}");
+            
+            var response = await _httpClient.SendAsync(request);
+            if (response.IsSuccessStatusCode)
+            {
+                var content = await response.Content.ReadAsStringAsync();
+                return JsonDocument.Parse(content).RootElement;
+            }
+            return default;
+        }
+
+        public async Task<JsonElement> GetHoldingsAsync()
+        {
+            if (string.IsNullOrEmpty(_accessToken)) return default;
+            
+            var request = new HttpRequestMessage(HttpMethod.Get, "https://api-t1.fyers.in/api/v3/holdings");
+            request.Headers.TryAddWithoutValidation("Authorization", $"{_config["FYERS_APP_ID"]}:{_accessToken}");
+            
+            var response = await _httpClient.SendAsync(request);
+            if (response.IsSuccessStatusCode)
+            {
+                var content = await response.Content.ReadAsStringAsync();
+                return JsonDocument.Parse(content).RootElement;
+            }
+            return default;
         }
 
         public async Task PlaceOrderAsync(string instrument, string action, int quantity, decimal expectedPrice)

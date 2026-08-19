@@ -1,7 +1,8 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Briefcase, TrendingUp, TrendingDown, RefreshCcw, Filter } from "lucide-react";
+import { fetchWithAuth } from "@/lib/api";
 
 type PositionStatus = "ACTIVE" | "EXITED";
 type PositionType = "LONG" | "SHORT";
@@ -19,21 +20,74 @@ interface Position {
   category: PositionCategory;
 }
 
-const MOCK_DATA: Position[] = [
-  { id: 1, symbol: "NIFTY24MAY22000CE", qty: 250, buyPrice: 105.50, ltp: 120.25, type: "LONG", status: "ACTIVE", category: "DAY" },
-  { id: 2, symbol: "NIFTY-EQ", qty: 100, buyPrice: 22100.00, ltp: 22150.45, type: "LONG", status: "ACTIVE", category: "HOLDING" },
-  { id: 3, symbol: "RELIANCE-EQ", qty: 50, buyPrice: 2900.00, sellPrice: 2950.00, ltp: 2950.00, type: "LONG", status: "EXITED", category: "DAY" },
-  { id: 4, symbol: "BANKNIFTY24MAY48000PE", qty: 150, buyPrice: 200.00, ltp: 150.00, type: "SHORT", status: "ACTIVE", category: "DAY" },
-  { id: 5, symbol: "HDFCBANK-EQ", qty: 200, buyPrice: 1500.00, ltp: 1520.00, type: "LONG", status: "ACTIVE", category: "HOLDING" },
-];
-
 export default function PositionsPage() {
   const [activeTab, setActiveTab] = useState<PositionCategory>("DAY");
   
   const [filterStatus, setFilterStatus] = useState<PositionStatus | "ALL">("ALL");
   const [filterType, setFilterType] = useState<PositionType | "ALL">("ALL");
 
-  const filteredData = MOCK_DATA.filter(item => {
+  const [positionsData, setPositionsData] = useState<Position[]>([]);
+
+  useEffect(() => {
+    const fetchPositions = async () => {
+      try {
+        const [posRes, holdRes] = await Promise.all([
+          fetchWithAuth("/api/portfolio/positions"),
+          fetchWithAuth("/api/portfolio/holdings")
+        ]);
+
+        let mapped: Position[] = [];
+
+        if (posRes.ok) {
+          const data = await posRes.json();
+          if (data.netPositions) {
+            data.netPositions.forEach((p: any) => {
+              const qty = Math.abs(p.netQty);
+              mapped.push({
+                id: mapped.length + 1,
+                symbol: p.symbol,
+                qty: qty,
+                buyPrice: p.buyAvg,
+                sellPrice: p.sellAvg,
+                ltp: p.ltp,
+                type: p.netQty >= 0 ? "LONG" : "SHORT",
+                status: qty === 0 ? "EXITED" : "ACTIVE",
+                category: "DAY"
+              });
+            });
+          }
+        }
+
+        if (holdRes.ok) {
+          const data = await holdRes.json();
+          if (data.holdings) {
+            data.holdings.forEach((h: any) => {
+              mapped.push({
+                id: mapped.length + 1,
+                symbol: h.symbol,
+                qty: h.quantity,
+                buyPrice: h.costPrice,
+                ltp: h.ltp,
+                type: "LONG",
+                status: "ACTIVE",
+                category: "HOLDING"
+              });
+            });
+          }
+        }
+        
+        setPositionsData(mapped);
+      } catch (err) {
+        console.error("Failed to fetch positions", err);
+      }
+    };
+    
+    fetchPositions();
+    const interval = setInterval(fetchPositions, 5000);
+    return () => clearInterval(interval);
+  }, []);
+
+  const filteredData = positionsData.filter(item => {
     if (item.category !== activeTab) return false;
     if (filterStatus !== "ALL" && item.status !== filterStatus) return false;
     if (filterType !== "ALL" && item.type !== filterType) return false;
