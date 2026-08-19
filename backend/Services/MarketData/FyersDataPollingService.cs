@@ -25,14 +25,18 @@ namespace StoicTrade.Api.Services.MarketData
             ILogger<FyersDataPollingService> logger,
             MarketDataCache cache,
             FyersApiService fyersApi,
-            MarketDataAggregatorService aggregator)
+            MarketDataAggregatorService aggregator,
+            Microsoft.Extensions.Configuration.IConfiguration config)
         {
             _logger = logger;
             _cache = cache;
             _fyersApi = fyersApi;
             _aggregator = aggregator;
             _httpClient = new HttpClient();
+            _config = config;
         }
+
+        private readonly Microsoft.Extensions.Configuration.IConfiguration _config;
 
         protected override async Task ExecuteAsync(CancellationToken stoppingToken)
         {
@@ -54,7 +58,8 @@ namespace StoicTrade.Api.Services.MarketData
                         continue;
                     }
 
-                    _httpClient.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", token);
+                    _httpClient.DefaultRequestHeaders.Clear();
+                    _httpClient.DefaultRequestHeaders.Add("Authorization", $"{_config["FYERS_APP_ID"]}:{token}");
 
                     // 2. We need NIFTY Spot to know which strikes to query. 
                     // First fetch just the spot price.
@@ -102,7 +107,20 @@ namespace StoicTrade.Api.Services.MarketData
                     // 3. Generate Option Symbols for +/- 5 strikes (Step size 50)
                     int atmStrike = (int)Math.Round(spotPrice / 50.0m) * 50;
                     var optionSymbols = new List<string>();
-                    var expiryFormatted = GetNextThursday().ToString("yyMMM").ToUpper(); // e.g. 26AUG
+                    var nextThurs = GetNextThursday();
+                    string expiryFormatted;
+                    
+                    // Logic for Fyers weekly/monthly expiries
+                    // Monthly expiries (last Thursday of the month) use yyMMM format (e.g. 26AUG).
+                    // Weekly expiries use yyMd (e.g. 26820 for Aug 20, 2026, month is 1-9 without leading zero, or O, N, D for Oct, Nov, Dec).
+                    // For simplicity and since we don't have a holiday calendar, we'll try the weekly format first.
+                    int month = nextThurs.Month;
+                    string monthChar = month <= 9 ? month.ToString() : (month == 10 ? "O" : (month == 11 ? "N" : "D"));
+                    string weeklyFormat = $"{nextThurs.ToString("yy")}{monthChar}{nextThurs.ToString("dd")}";
+                    string monthlyFormat = nextThurs.ToString("yyMMM").ToUpper();
+                    
+                    // We will query both to be safe, Fyers will ignore the invalid one
+                    expiryFormatted = weeklyFormat;
                     
                     // Note: Fyers weekly format is slightly complex. If month expiry, it's yyMMM (26AUG). 
                     // For simplicity in this paper trading mode, we'll request a generic strike format and handle 404s gracefully.
@@ -111,8 +129,10 @@ namespace StoicTrade.Api.Services.MarketData
                     for (int i = -5; i <= 5; i++)
                     {
                         int strike = atmStrike + (i * 50);
-                        optionSymbols.Add($"NSE:NIFTY{expiryFormatted}{strike}CE");
-                        optionSymbols.Add($"NSE:NIFTY{expiryFormatted}{strike}PE");
+                        optionSymbols.Add($"NSE:NIFTY{weeklyFormat}{strike}CE");
+                        optionSymbols.Add($"NSE:NIFTY{weeklyFormat}{strike}PE");
+                        optionSymbols.Add($"NSE:NIFTY{monthlyFormat}{strike}CE");
+                        optionSymbols.Add($"NSE:NIFTY{monthlyFormat}{strike}PE");
                     }
 
                     var symbolQuery = "NSE:NIFTY50-INDEX," + string.Join(",", optionSymbols);
