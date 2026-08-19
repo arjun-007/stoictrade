@@ -135,10 +135,16 @@ namespace StoicTrade.Api.Services
 
         public async Task<string> GenerateTotpPinAsync(string totpSecretEnc, string masterKey)
         {
-            // Note: Currently returns a dummy pin for the generic frontend TOTP verifier
-            _logger.LogInformation("Fyers API: Generating TOTP pin for UI");
+            _logger.LogInformation("Fyers API: Generating REAL TOTP pin from environment config");
             await Task.Delay(50);
-            return new Random().Next(100000, 999999).ToString();
+            
+            var secret = _config["FYERS_TOTP_SECRET"];
+            if (string.IsNullOrEmpty(secret)) 
+            {
+                throw new Exception("FYERS_TOTP_SECRET is not set in the environment (.env) file.");
+            }
+
+            return GenerateTotpPin(secret);
         }
 
         public async Task<System.Collections.Generic.List<StoicTrade.Api.Models.Candle>> GetHistoricalCandlesAsync(string symbol, string resolution, DateTime from, DateTime to)
