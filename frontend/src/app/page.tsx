@@ -35,6 +35,29 @@ export default function Dashboard() {
       .then((res) => res.json())
       .then((data) => setShutdownMinutes(data.killSwitchShutdownMinutes || 720))
       .catch((err) => console.error("Failed to fetch settings", err));
+
+    // Handle auth callback from Fyers
+    const urlParams = new URLSearchParams(window.location.search);
+    const authCode = urlParams.get('auth_code');
+    if (authCode) {
+      fetchWithAuth("/api/engine/callback", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ authCode })
+      })
+      .then(res => res.json())
+      .then(data => {
+        if (data.token) {
+          setIsEngineRunning(true);
+          alert("Engine started successfully!");
+        } else {
+          alert("Failed to start engine: " + (data.error || "Unknown error"));
+        }
+        // Clean up URL
+        window.history.replaceState({}, document.title, window.location.pathname);
+      })
+      .catch(err => console.error("Failed to handle auth callback", err));
+    }
   }, []);
 
   const handleKillSwitch = () => {
@@ -100,10 +123,15 @@ export default function Dashboard() {
     try {
       const endpoint = isEngineRunning ? "stop" : "start";
       const res = await fetchWithAuth(`/api/engine/${endpoint}`, { method: "POST" });
+      const data = await res.json();
+      
       if (res.ok) {
-        setIsEngineRunning(!isEngineRunning);
+        if (data.authUrl) {
+          window.location.href = data.authUrl;
+        } else {
+          setIsEngineRunning(!isEngineRunning);
+        }
       } else {
-        const data = await res.json();
         alert(data.error || "Failed to toggle engine");
       }
     } catch (err) {
