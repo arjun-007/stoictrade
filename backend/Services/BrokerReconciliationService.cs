@@ -39,8 +39,11 @@ namespace StoicTrade.Api.Services
                         // var internalPositions = await GetInternalPositionsAsync();
 
                         // 3. Compare (Dummy logic for now: just log)
-                        _logger.LogDebug("Reconciliation: Checked {Count} positions.", fyersPositions.Count);
-                        
+                        int count = 0;
+                        if (fyersPositions.ValueKind != System.Text.Json.JsonValueKind.Undefined && fyersPositions.TryGetProperty("netPositions", out var arr)) {
+                            count = arr.GetArrayLength();
+                        }
+                        _logger.LogDebug("Reconciliation: Checked {Count} positions.", count);
                         bool mismatchDetected = false; 
                         
                         if (mismatchDetected)

@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { ShieldAlert, TrendingUp, DollarSign, Briefcase, Key } from "lucide-react";
+import { ShieldAlert, TrendingUp, TrendingDown, DollarSign, Briefcase, Key } from "lucide-react";
 import { fetchWithAuth } from "@/lib/api";
 
 export default function Dashboard() {
