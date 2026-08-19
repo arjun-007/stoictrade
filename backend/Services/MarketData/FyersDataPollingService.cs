@@ -144,7 +144,7 @@ namespace StoicTrade.Api.Services.MarketData
                         var optDoc = JsonDocument.Parse(optJson);
                         
                         // Map Fyers JSON back to NSE format for backward compatibility with Watchlist UI
-                        var mappedJson = MapFyersToNseFormat(optDoc, spotPrice, expiryFormatted);
+                        var mappedJson = MapFyersToNseFormat(optDoc, spotPrice);
                         _cache.UpdateOptionChainData("NIFTY", mappedJson);
                         _logger.LogDebug($"Fyers Poller: Updated Option Chain around {atmStrike}");
                     }
@@ -161,10 +161,11 @@ namespace StoicTrade.Api.Services.MarketData
             _logger.LogInformation("Fyers Data Polling Service is stopping.");
         }
 
-        private string MapFyersToNseFormat(JsonDocument fyersDoc, decimal spotPrice, string expiry)
+        private string MapFyersToNseFormat(JsonDocument fyersDoc, decimal spotPrice)
         {
             var dataArray = fyersDoc.RootElement.GetProperty("d");
-            var strikesMap = new Dictionary<int, Dictionary<string, object>>();
+            // strikesMap[expiry][strike][type]
+            var strikesMap = new Dictionary<string, Dictionary<int, Dictionary<string, object>>>();
 
             foreach (var item in dataArray.EnumerateArray())
             {
@@ -177,36 +178,56 @@ namespace StoicTrade.Api.Services.MarketData
                 var symbol = shortNameProp.GetString();
                 if (symbol == "NIFTY50-INDEX" || string.IsNullOrEmpty(symbol)) continue;
 
-                // Parse symbol NSE:NIFTY26AUG22000CE
                 try
                 {
-                    var strikeStr = new string(symbol.Where(char.IsDigit).ToArray()).Substring(2); // Skip year
-                    int strike = int.Parse(strikeStr);
-                    string type = symbol.EndsWith("CE") ? "CE" : "PE";
+                    // symbol format: NSE:NIFTY26AUG23850CE or NSE:NIFTY2682023850CE
+                    string noPrefix = symbol.StartsWith("NSE:NIFTY") ? symbol.Substring(9) : symbol;
+                    string type = noPrefix.EndsWith("CE") ? "CE" : "PE";
+                    string noSuffix = noPrefix.Substring(0, noPrefix.Length - 2);
                     
+                    int strikeLength = 0;
+                    for (int i = noSuffix.Length - 1; i >= 0; i--)
+                    {
+                        if (char.IsDigit(noSuffix[i])) strikeLength++;
+                        else break;
+                    }
+                    
+                    if (strikeLength == 0) continue;
+                    
+                    string strikeStr = noSuffix.Substring(noSuffix.Length - strikeLength);
+                    string actualExpiry = noSuffix.Substring(0, noSuffix.Length - strikeLength);
+                    int strike = int.Parse(strikeStr);
+
                     if (!v.TryGetProperty("lp", out var lpProp) || !v.TryGetProperty("chp", out var chpProp)) continue;
                     
                     decimal lp = lpProp.GetDecimal();
                     decimal change = chpProp.GetDecimal();
 
-                    if (!strikesMap.ContainsKey(strike))
-                        strikesMap[strike] = new Dictionary<string, object>();
+                    if (!strikesMap.ContainsKey(actualExpiry))
+                        strikesMap[actualExpiry] = new Dictionary<int, Dictionary<string, object>>();
 
-                    strikesMap[strike][type] = new { lastPrice = lp, change = change };
+                    if (!strikesMap[actualExpiry].ContainsKey(strike))
+                        strikesMap[actualExpiry][strike] = new Dictionary<string, object>();
+
+                    strikesMap[actualExpiry][strike][type] = new { lastPrice = lp, change = change };
                 }
                 catch { }
             }
 
             var recordsData = new List<object>();
-            foreach (var kvp in strikesMap.OrderBy(x => x.Key))
+            foreach (var expiryKvp in strikesMap)
             {
-                recordsData.Add(new
+                var expiry = expiryKvp.Key;
+                foreach (var strikeKvp in expiryKvp.Value.OrderBy(x => x.Key))
                 {
-                    strikePrice = kvp.Key,
-                    expiryDate = expiry,
-                    CE = kvp.Value.ContainsKey("CE") ? kvp.Value["CE"] : null,
-                    PE = kvp.Value.ContainsKey("PE") ? kvp.Value["PE"] : null
-                });
+                    recordsData.Add(new
+                    {
+                        strikePrice = strikeKvp.Key,
+                        expiryDate = expiry,
+                        CE = strikeKvp.Value.ContainsKey("CE") ? strikeKvp.Value["CE"] : null,
+                        PE = strikeKvp.Value.ContainsKey("PE") ? strikeKvp.Value["PE"] : null
+                    });
+                }
             }
 
             var result = new

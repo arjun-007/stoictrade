@@ -28,9 +28,31 @@ export default function WatchlistPage() {
   ]);
   const [activeWatchlistId, setActiveWatchlistId] = useState<string>("wl_1");
   const [liveInstruments, setLiveInstruments] = useState<WatchlistItem[]>([]);
+  const [isLoaded, setIsLoaded] = useState(false);
   
   const [search, setSearch] = useState("");
   const [selectedInstrument, setSelectedInstrument] = useState<WatchlistItem | null>(null);
+
+  useEffect(() => {
+    const savedLists = localStorage.getItem("stoictrade_watchlists");
+    const savedActiveId = localStorage.getItem("stoictrade_active_watchlist");
+    if (savedLists) {
+      try {
+        setWatchlists(JSON.parse(savedLists));
+      } catch (e) { }
+    }
+    if (savedActiveId) {
+      setActiveWatchlistId(savedActiveId);
+    }
+    setIsLoaded(true);
+  }, []);
+
+  useEffect(() => {
+    if (isLoaded) {
+      localStorage.setItem("stoictrade_watchlists", JSON.stringify(watchlists));
+      localStorage.setItem("stoictrade_active_watchlist", activeWatchlistId);
+    }
+  }, [watchlists, activeWatchlistId, isLoaded]);
 
   useEffect(() => {
     // Poll NSE Option Chain data from our backend
