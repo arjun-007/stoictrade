@@ -33,5 +33,33 @@ namespace StoicTrade.Api.Controllers
             // We can return the raw JSON directly as a Content result since it's already a JSON string
             return Content(rawJson, "application/json");
         }
+
+        [HttpGet("all")]
+        public IActionResult GetAllMarketData()
+        {
+            var rawJson = _cache.GetOptionChainData("NIFTY");
+            var optionsData = rawJson != null ? System.Text.Json.JsonDocument.Parse(rawJson).RootElement : default;
+
+            var spots = new System.Collections.Generic.Dictionary<string, object>();
+            
+            // Common symbols we might be tracking
+            var symbolsToCheck = new[] { "NIFTY", "HDFCBANK-EQ", "RELIANCE-EQ", "SBIN-EQ", "ICICIBANK-EQ" };
+            foreach (var sym in symbolsToCheck)
+            {
+                var spot = _cache.GetSpotData(sym);
+                if (spot != null)
+                {
+                    spots[sym] = new {
+                        lastPrice = spot.Price,
+                        timestamp = spot.Timestamp
+                    };
+                }
+            }
+
+            return Ok(new {
+                options = optionsData,
+                spots = spots
+            });
+        }
     }
 }

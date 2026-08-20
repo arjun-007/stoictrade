@@ -35,6 +35,37 @@ namespace StoicTrade.Api.Controllers
                 };
                 
                 dbContext.TradeLogs.Add(trade);
+                
+                var position = await Microsoft.EntityFrameworkCore.EntityFrameworkQueryableExtensions.FirstOrDefaultAsync(dbContext.PaperPositions, p => p.Symbol == request.Instrument);
+                if (position == null)
+                {
+                    position = new StoicTrade.Api.Models.PaperPosition { Symbol = request.Instrument };
+                    dbContext.PaperPositions.Add(position);
+                }
+
+                if (request.OrderType == "BUY")
+                {
+                    decimal totalVal = (position.BuyAvg * position.TotalBuyQty) + (trade.ExecutionPrice * request.Quantity);
+                    position.TotalBuyQty += request.Quantity;
+                    position.BuyAvg = totalVal / position.TotalBuyQty;
+                    position.NetQty += request.Quantity;
+                    position.TotalBuyValue += trade.ExecutionPrice * request.Quantity;
+                }
+                else
+                {
+                    decimal totalVal = (position.SellAvg * position.TotalSellQty) + (trade.ExecutionPrice * request.Quantity);
+                    position.TotalSellQty += request.Quantity;
+                    position.SellAvg = totalVal / position.TotalSellQty;
+                    position.NetQty -= request.Quantity;
+                    position.TotalSellValue += trade.ExecutionPrice * request.Quantity;
+                    
+                    if (position.NetQty >= 0)
+                    {
+                        position.RealizedProfit += (trade.ExecutionPrice - position.BuyAvg) * request.Quantity;
+                    }
+                }
+                position.UpdatedAt = DateTime.UtcNow;
+
                 await dbContext.SaveChangesAsync();
                 
                 return Ok(new { Message = $"[PAPER] Order for {request.Instrument} filled at CMP: {trade.ExecutionPrice}" });

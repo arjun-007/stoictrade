@@ -12,7 +12,8 @@ interface OrderModalProps {
 }
 
 export default function OrderModal({ instrument, price = 0, change = 0, onClose }: OrderModalProps) {
-  const [quantity, setQuantity] = useState(50);
+  const [quantity, setQuantity] = useState(65);
+  const [baseLotSize, setBaseLotSize] = useState(65);
   const [orderType, setOrderType] = useState<"BUY" | "SELL">("BUY");
   const [orderMode, setOrderMode] = useState<"MARKET" | "LIMIT">("MARKET");
   const [entryPrice, setEntryPrice] = useState<string>("");
@@ -21,6 +22,18 @@ export default function OrderModal({ instrument, price = 0, change = 0, onClose 
   
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    fetchWithAuth("/api/globalsettings")
+      .then(res => res.json())
+      .then(data => {
+        if (data.baseLotSize) {
+          setBaseLotSize(data.baseLotSize);
+          setQuantity(data.baseLotSize);
+        }
+      })
+      .catch(err => console.error(err));
+  }, []);
 
   const calculationPrice = orderMode === "LIMIT" && entryPrice ? Number(entryPrice) : price;
   const estimatedMargin = (quantity * calculationPrice).toFixed(2);
@@ -113,7 +126,7 @@ export default function OrderModal({ instrument, price = 0, change = 0, onClose 
             <label className="block text-sm font-semibold text-slate-700 dark:text-slate-300 mb-2">Quantity</label>
             <div className="flex items-center">
               <button 
-                onClick={() => setQuantity(Math.max(1, quantity - 50))}
+                onClick={() => setQuantity(Math.max(1, quantity - baseLotSize))}
                 className="w-12 h-12 flex items-center justify-center bg-slate-100 dark:bg-slate-800 rounded-l-xl text-xl font-bold hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors"
               >-</button>
               <input 
@@ -123,7 +136,7 @@ export default function OrderModal({ instrument, price = 0, change = 0, onClose 
                 className="w-full h-12 text-center bg-slate-50 dark:bg-slate-900 border-y border-slate-100 dark:border-slate-800 font-bold text-lg focus:outline-none"
               />
               <button 
-                onClick={() => setQuantity(quantity + 50)}
+                onClick={() => setQuantity(quantity + baseLotSize)}
                 className="w-12 h-12 flex items-center justify-center bg-slate-100 dark:bg-slate-800 rounded-r-xl text-xl font-bold hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors"
               >+</button>
             </div>

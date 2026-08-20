@@ -20,5 +20,6 @@ namespace StoicTrade.Api.Models
         public string TradeMode { get; set; } = "Paper";
         public int KillSwitchShutdownMinutes { get; set; } = 720;
         public int AutoTradeLots { get; set; } = 1;
+        public int BaseLotSize { get; set; } = 65;
     }
 }

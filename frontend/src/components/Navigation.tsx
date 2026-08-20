@@ -2,15 +2,16 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { LayoutDashboard, TrendingUp, Settings, ListOrdered, ShieldAlert, BarChart2, Settings2, LogOut } from "lucide-react";
+import { LayoutDashboard, TrendingUp, Settings, ListOrdered, ShieldAlert, BarChart2, Settings2, LogOut, Activity, List, Briefcase, Cpu } from "lucide-react";
 import clsx from "clsx";
 
 const navItems = [
-  { name: "Dashboard", href: "/", icon: LayoutDashboard },
-  { name: "Watchlist", href: "/watchlist", icon: TrendingUp },
-  { name: "Positions", href: "/positions", icon: BarChart2 },
-  { name: "Strategies", href: "/strategies", icon: Settings },
-  { name: "Settings", href: "/settings", icon: Settings2 },
+  { name: 'Dashboard', href: '/', icon: Activity },
+  { name: 'Watchlist', href: '/watchlist', icon: List },
+  { name: 'Positions', href: '/positions', icon: Briefcase },
+  { name: 'Strategies', href: '/strategies', icon: Cpu },
+  { name: 'Strategy Analysis', href: '/strategy-analysis', icon: Activity },
+  { name: 'Settings', href: '/settings', icon: Settings }
 ];
 
 export default function Navigation() {

@@ -16,6 +16,7 @@ interface GlobalSettings {
   tradeMode: string;
   killSwitchShutdownMinutes: number;
   autoTradeLots: number;
+  baseLotSize: number;
 }
 
 export default function SettingsPage() {
@@ -154,7 +155,17 @@ export default function SettingsPage() {
                 onChange={e => handleChange('autoTradeLots', Number(e.target.value))}
                 className="w-full px-4 py-3 rounded-xl border border-slate-200 dark:border-slate-700 bg-transparent focus:ring-2 focus:ring-primary outline-none"
               />
-              <p className="text-xs text-slate-500 mt-1">Number of lots to execute per trade (multiplied by 65).</p>
+              <p className="text-xs text-slate-500 mt-1">Number of lots to execute per trade (multiplied by Base Lot Size).</p>
+            </div>
+            <div>
+              <label className="block text-sm font-semibold text-slate-700 dark:text-slate-300 mb-2">Base Lot Size</label>
+              <input 
+                type="number" 
+                value={settings.baseLotSize}
+                onChange={e => handleChange('baseLotSize', Number(e.target.value))}
+                className="w-full px-4 py-3 rounded-xl border border-slate-200 dark:border-slate-700 bg-transparent focus:ring-2 focus:ring-primary outline-none"
+              />
+              <p className="text-xs text-slate-500 mt-1">Default quantity size for options (e.g. 25, 50, 65).</p>
             </div>
             <div>
               <label className="block text-sm font-semibold text-slate-700 dark:text-slate-300 mb-2">Max Trades Per Day</label>

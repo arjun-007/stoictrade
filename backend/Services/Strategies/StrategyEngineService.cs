@@ -42,7 +42,7 @@ namespace StoicTrade.Api.Services.Strategies
                     var globalSettings = dbContext.GlobalSettings.FirstOrDefault();
                     string marketDataJson = "{\"symbol\": \"NIFTY\", \"price\": 22000}"; // Default fallback
 
-                    if (globalSettings != null && globalSettings.TradeMode == "PaperTrading")
+                    if (globalSettings != null && globalSettings.TradeMode == "Paper")
                     {
                         var marketCache = scope.ServiceProvider.GetRequiredService<StoicTrade.Api.Services.MarketData.MarketDataCache>();
                         var spot = marketCache.GetSpotData("NIFTY");
@@ -82,8 +82,8 @@ namespace StoicTrade.Api.Services.Strategies
                     {
                         if (globalSettings != null)
                         {
-                            // Multiply the base quantity (65) by AutoTradeLots (default 1)
-                            signal.Quantity = 65 * Math.Max(1, globalSettings.AutoTradeLots);
+                            // Multiply the base quantity by AutoTradeLots (default 1)
+                            signal.Quantity = globalSettings.BaseLotSize * Math.Max(1, globalSettings.AutoTradeLots);
                         }
                         
                         await riskEngine.EvaluateAndExecuteAsync(signal);

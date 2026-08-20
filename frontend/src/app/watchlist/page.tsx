@@ -58,16 +58,16 @@ export default function WatchlistPage() {
     // Poll NSE Option Chain data from our backend
     const fetchData = async () => {
       try {
-        const res = await fetchWithAuth("/api/marketdata/options?symbol=NIFTY");
+        const res = await fetchWithAuth("/api/marketdata/all");
         if (res.ok) {
           const data = await res.json();
-          const records = data.records?.data || [];
+          const records = data.options?.data || [];
           
           const newInstruments: WatchlistItem[] = [];
           
           // Parse top 5 strikes around ATM
-          if (data.records?.underlyingValue && records.length > 0) {
-             const spot = data.records.underlyingValue;
+          if (data.options?.underlyingValue && records.length > 0) {
+             const spot = data.options.underlyingValue;
              // Push spot
              newInstruments.push({ id: "NIFTY-SPOT", symbol: "NIFTY-SPOT", price: spot, change: 0 });
              
@@ -107,8 +107,22 @@ export default function WatchlistPage() {
                    });
                 }
              }
-             
-             setLiveInstruments(newInstruments);
+          }
+
+          if (data.spots) {
+             Object.keys(data.spots).forEach(sym => {
+                if (sym !== "NIFTY") {
+                   newInstruments.push({
+                      id: sym,
+                      symbol: sym,
+                      price: data.spots[sym].lastPrice || 0,
+                      change: 0 // Mock change
+                   });
+                }
+             });
+          }
+          
+          setLiveInstruments(newInstruments);
              
              // Update prices in the active watchlists
              setWatchlists(prevLists => prevLists.map(wl => ({

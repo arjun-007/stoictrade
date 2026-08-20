@@ -61,9 +61,10 @@ namespace StoicTrade.Api.Services.MarketData
                     _httpClient.DefaultRequestHeaders.Clear();
                     _httpClient.DefaultRequestHeaders.TryAddWithoutValidation("Authorization", $"{_config["FYERS_APP_ID"]}:{token}");
 
-                    // 2. We need NIFTY Spot to know which strikes to query. 
-                    // First fetch just the spot price.
-                    var spotRes = await _httpClient.GetAsync("https://api-t1.fyers.in/data/quotes?symbols=NSE:NIFTY50-INDEX", stoppingToken);
+                    // 2. Query spot prices for all TrackedSymbols
+                    var trackedSymbols = _config.GetSection("TrackedSymbols").Get<string[]>() ?? new[] { "NSE:NIFTY50-INDEX" };
+                    var spotQuery = string.Join(",", trackedSymbols);
+                    var spotRes = await _httpClient.GetAsync($"https://api-t1.fyers.in/data/quotes?symbols={spotQuery}", stoppingToken);
                     if (!spotRes.IsSuccessStatusCode)
                     {
                         await Task.Delay(3000, stoppingToken);
@@ -73,70 +74,74 @@ namespace StoicTrade.Api.Services.MarketData
                     var spotJson = await spotRes.Content.ReadAsStringAsync(stoppingToken);
                     var spotDoc = JsonDocument.Parse(spotJson);
                     
-                    decimal spotPrice = 0;
+                    decimal niftySpotPrice = 0;
                     try
                     {
                         var dataArray = spotDoc.RootElement.GetProperty("d");
-                        if (dataArray.GetArrayLength() > 0)
+                        foreach (var item in dataArray.EnumerateArray())
                         {
-                            var v = dataArray[0].GetProperty("v");
-                            spotPrice = v.GetProperty("lp").GetDecimal();
+                            var v = item.GetProperty("v");
+                            var lp = v.GetProperty("lp").GetDecimal();
+                            var symbol = v.GetProperty("short_name").GetString() ?? "";
                             var volume = v.TryGetProperty("volume", out var vol) ? vol.GetDecimal() : 0m;
                             
-                            _cache.UpdateSpotData("NIFTY", spotPrice, DateTime.UtcNow);
+                            // Normalize symbol name (e.g. NIFTY50-INDEX -> NIFTY)
+                            string cacheKey = symbol.Replace("NSE:", "").Replace("50-INDEX", "");
+                            _cache.UpdateSpotData(cacheKey, lp, DateTime.UtcNow);
 
-                            if (!_isAggregatorInitialized)
+                            if (symbol == "NIFTY50-INDEX")
                             {
-                                // Initialize aggregator for NIFTY spot with 1m, 5m, 15m resolutions
-                                await _aggregator.InitializeSymbolAsync("NSE:NIFTY50-INDEX", new[] { 1, 5, 15 });
-                                _isAggregatorInitialized = true;
+                                niftySpotPrice = lp;
+                                if (!_isAggregatorInitialized)
+                                {
+                                    await _aggregator.InitializeSymbolAsync("NSE:NIFTY50-INDEX", new[] { 1, 5, 15 });
+                                    _isAggregatorInitialized = true;
+                                }
+                                _aggregator.UpdateTick("NSE:NIFTY50-INDEX", niftySpotPrice, volume);
                             }
-                            
-                            // Update the live forming candles
-                            _aggregator.UpdateTick("NSE:NIFTY50-INDEX", spotPrice, volume);
                         }
                     }
                     catch { /* Handle unexpected JSON safely */ }
 
-                    if (spotPrice == 0)
+                    if (niftySpotPrice == 0)
                     {
                         await Task.Delay(2000, stoppingToken);
                         continue;
                     }
 
-                    // 3. Generate Option Symbols for +/- 5 strikes (Step size 50)
-                    int atmStrike = (int)Math.Round(spotPrice / 50.0m) * 50;
+                    // 3. Generate Option Symbols for +/- 5 strikes (Step size 50) for multiple expiries
+                    int atmStrike = (int)Math.Round(niftySpotPrice / 50.0m) * 50;
                     var optionSymbols = new List<string>();
-                    var nextThurs = GetNextThursday();
-                    string expiryFormatted;
+                    var expiries = GetUpcomingExpiries();
                     
-                    // Logic for Fyers weekly/monthly expiries
-                    // Monthly expiries (last Thursday of the month) use yyMMM format (e.g. 26AUG).
-                    // Weekly expiries use yyMd (e.g. 26820 for Aug 20, 2026, month is 1-9 without leading zero, or O, N, D for Oct, Nov, Dec).
-                    // For simplicity and since we don't have a holiday calendar, we'll try the weekly format first.
-                    int month = nextThurs.Month;
-                    string monthChar = month <= 9 ? month.ToString() : (month == 10 ? "O" : (month == 11 ? "N" : "D"));
-                    string weeklyFormat = $"{nextThurs.ToString("yy")}{monthChar}{nextThurs.ToString("dd")}";
-                    string monthlyFormat = nextThurs.ToString("yyMMM").ToUpper();
-                    
-                    // We will query both to be safe, Fyers will ignore the invalid one
-                    expiryFormatted = weeklyFormat;
-                    
-                    // Note: Fyers weekly format is slightly complex. If month expiry, it's yyMMM (26AUG). 
-                    // For simplicity in this paper trading mode, we'll request a generic strike format and handle 404s gracefully.
-                    // Example format: NSE:NIFTY26AUG22000CE
-                    
-                    for (int i = -5; i <= 5; i++)
+                    foreach (var expiry in expiries)
                     {
-                        int strike = atmStrike + (i * 50);
-                        optionSymbols.Add($"NSE:NIFTY{weeklyFormat}{strike}CE");
-                        optionSymbols.Add($"NSE:NIFTY{weeklyFormat}{strike}PE");
-                        optionSymbols.Add($"NSE:NIFTY{monthlyFormat}{strike}CE");
-                        optionSymbols.Add($"NSE:NIFTY{monthlyFormat}{strike}PE");
+                        for (int i = -5; i <= 5; i++)
+                        {
+                            int strike = atmStrike + (i * 50);
+                            optionSymbols.Add($"NSE:NIFTY{expiry}{strike}CE");
+                            optionSymbols.Add($"NSE:NIFTY{expiry}{strike}PE");
+                        }
                     }
 
-                    var symbolQuery = "NSE:NIFTY50-INDEX," + string.Join(",", optionSymbols);
-                    var optRes = await _httpClient.GetAsync($"https://api-t1.fyers.in/data/quotes?symbols={symbolQuery}", stoppingToken);
+                    // Query in batches if too many symbols, but Fyers allows up to 50 symbols. 
+                    // Actually Fyers allows comma separated. Let's limit the query to avoid URL too long.
+                    // If expiries count is large, this might exceed limits. We have ~4 expiries * 22 symbols = 88 symbols. Fyers quote API allows up to 50.
+                    // We'll just take the first 2 expiries for now to stay under 50. (2 * 22 = 44 symbols)
+                    var queryExpiries = expiries.Take(2).ToList();
+                    optionSymbols.Clear();
+                    foreach (var expiry in queryExpiries)
+                    {
+                        for (int i = -5; i <= 5; i++)
+                        {
+                            int strike = atmStrike + (i * 50);
+                            optionSymbols.Add($"NSE:NIFTY{expiry}{strike}CE");
+                            optionSymbols.Add($"NSE:NIFTY{expiry}{strike}PE");
+                        }
+                    }
+
+                    var symbolQueryOpts = string.Join(",", optionSymbols);
+                    var optRes = await _httpClient.GetAsync($"https://api-t1.fyers.in/data/quotes?symbols={symbolQueryOpts}", stoppingToken);
                     
                     if (optRes.IsSuccessStatusCode)
                     {
@@ -144,7 +149,7 @@ namespace StoicTrade.Api.Services.MarketData
                         var optDoc = JsonDocument.Parse(optJson);
                         
                         // Map Fyers JSON back to NSE format for backward compatibility with Watchlist UI
-                        var mappedJson = MapFyersToNseFormat(optDoc, spotPrice);
+                        var mappedJson = MapFyersToNseFormat(optDoc, niftySpotPrice);
                         _cache.UpdateOptionChainData("NIFTY", mappedJson);
                         _logger.LogDebug($"Fyers Poller: Updated Option Chain around {atmStrike}");
                     }
@@ -242,12 +247,27 @@ namespace StoicTrade.Api.Services.MarketData
             return JsonSerializer.Serialize(result);
         }
 
-        private DateTime GetNextThursday()
+        private List<string> GetUpcomingExpiries()
         {
+            var expiries = new List<string>();
             DateTime today = DateTime.UtcNow.Date;
-            int daysUntilThursday = ((int)DayOfWeek.Thursday - (int)today.DayOfWeek + 7) % 7;
-            if (daysUntilThursday == 0 && today.Hour > 15) daysUntilThursday = 7;
-            return today.AddDays(daysUntilThursday);
+            
+            // Generate next 4 Thursdays
+            for (int i = 0; i < 4; i++)
+            {
+                int daysUntilThursday = ((int)DayOfWeek.Thursday - (int)today.DayOfWeek + 7) % 7;
+                if (daysUntilThursday == 0 && DateTime.UtcNow.Hour > 15) daysUntilThursday = 7;
+                DateTime thurs = today.AddDays(daysUntilThursday + (i * 7));
+                
+                int month = thurs.Month;
+                string monthChar = month <= 9 ? month.ToString() : (month == 10 ? "O" : (month == 11 ? "N" : "D"));
+                string weeklyFormat = $"{thurs.ToString("yy")}{monthChar}{thurs.ToString("dd")}";
+                string monthlyFormat = thurs.ToString("yyMMM").ToUpper();
+                
+                expiries.Add(weeklyFormat);
+                expiries.Add(monthlyFormat);
+            }
+            return expiries.Distinct().ToList();
         }
     }
 }
