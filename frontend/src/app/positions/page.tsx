@@ -42,15 +42,15 @@ export default function PositionsPage() {
           const data = await posRes.json();
           if (data.netPositions) {
             data.netPositions.forEach((p: any) => {
-              const qty = Math.abs(p.netQty);
+              const qty = Math.abs(p.netQty ?? 0);
               mapped.push({
                 id: mapped.length + 1,
-                symbol: p.symbol,
+                symbol: p.symbol ?? "-",
                 qty: qty,
-                buyPrice: p.buyAvg,
-                sellPrice: p.sellAvg,
-                ltp: p.ltp,
-                type: p.netQty >= 0 ? "LONG" : "SHORT",
+                buyPrice: p.buyAvg ?? 0,
+                sellPrice: p.sellAvg ?? 0,
+                ltp: p.ltp ?? p.buyAvg ?? 0,
+                type: (p.netQty ?? 0) >= 0 ? "LONG" : "SHORT",
                 status: qty === 0 ? "EXITED" : "ACTIVE",
                 category: "DAY"
               });
@@ -64,10 +64,10 @@ export default function PositionsPage() {
             data.holdings.forEach((h: any) => {
               mapped.push({
                 id: mapped.length + 1,
-                symbol: h.symbol,
-                qty: h.quantity,
-                buyPrice: h.costPrice,
-                ltp: h.ltp,
+                symbol: h.symbol ?? "-",
+                qty: h.quantity ?? 0,
+                buyPrice: h.costPrice ?? 0,
+                ltp: h.ltp ?? h.costPrice ?? 0,
                 type: "LONG",
                 status: "ACTIVE",
                 category: "HOLDING"
