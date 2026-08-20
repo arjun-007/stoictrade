@@ -133,7 +133,6 @@ export default function WatchlistPage() {
                  })
              })));
           }
-        }
       } catch (e) {
         console.error("Failed to fetch live data", e);
       }
