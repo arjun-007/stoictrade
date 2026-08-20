@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { X, TrendingUp, TrendingDown } from "lucide-react";
 import { fetchWithAuth } from "@/lib/api";
 
