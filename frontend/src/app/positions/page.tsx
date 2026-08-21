@@ -223,7 +223,30 @@ export default function PositionsPage() {
                       </td>
                       <td className="p-4 text-center">
                         {pos.status === "ACTIVE" ? (
-                          <button className="px-4 py-1.5 bg-danger/10 text-danger hover:bg-danger hover:text-white rounded-lg font-bold transition-colors text-sm">
+                          <button 
+                            onClick={async () => {
+                              if (!confirm(`Are you sure you want to exit ${pos.qty} qty of ${pos.symbol}?`)) return;
+                              try {
+                                const res = await fetchWithAuth("/api/orders", {
+                                  method: "POST",
+                                  body: JSON.stringify({
+                                    instrument: pos.symbol,
+                                    quantity: pos.qty,
+                                    orderType: pos.type === "LONG" ? "SELL" : "BUY"
+                                  })
+                                });
+                                if (res.ok) {
+                                  alert("Order placed successfully");
+                                  // The periodic poll (every 5s) will refresh the grid shortly.
+                                } else {
+                                  alert("Failed to exit position");
+                                }
+                              } catch (err) {
+                                console.error(err);
+                                alert("Error exiting position");
+                              }
+                            }}
+                            className="px-4 py-1.5 bg-danger/10 text-danger hover:bg-danger hover:text-white rounded-lg font-bold transition-colors text-sm">
                             EXIT
                           </button>
                         ) : (
