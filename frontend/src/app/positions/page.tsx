@@ -229,6 +229,9 @@ export default function PositionsPage() {
                               try {
                                 const res = await fetchWithAuth("/api/orders", {
                                   method: "POST",
+                                  headers: {
+                                    "Content-Type": "application/json"
+                                  },
                                   body: JSON.stringify({
                                     instrument: pos.symbol,
                                     quantity: pos.qty,
