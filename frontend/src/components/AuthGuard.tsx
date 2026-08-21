@@ -34,11 +34,11 @@ export default function AuthGuard({ children }: { children: React.ReactNode }) {
 
   // Render Dashboard with Navigation bar
   return (
-    <>
+    <div className="flex flex-col md:flex-row w-full min-h-screen">
       <Navigation />
       <main className="flex-1 w-full pb-20 md:pb-0 overflow-y-auto">
         {children}
       </main>
-    </>
+    </div>
   );
 }
