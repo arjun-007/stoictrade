@@ -43,15 +43,17 @@ export default function PositionsPage() {
           if (data.netPositions) {
             data.netPositions.forEach((p: any) => {
               const qty = Math.abs(p.netQty ?? 0);
+              // Normalise symbol: collapse old "NIFTYNIFTY…" entries stored in DB
+              const rawSymbol: string = p.symbol ?? "-";
+              const symbol = rawSymbol.startsWith("NIFTYNIFTY") ? rawSymbol.substring(5) : rawSymbol;
               mapped.push({
                 id: mapped.length + 1,
-                symbol: p.symbol ?? "-",
+                symbol,
                 qty: qty,
                 buyPrice: p.buyAvg ?? 0,
                 sellPrice: p.sellAvg ?? 0,
-                ltp: p.ltp ?? p.unrealized_profit !== undefined
-                  ? (p.ltp ?? p.buyAvg ?? 0)
-                  : (p.buyAvg ?? 0),
+                // ltp comes from the backend option price cache; fall back to avg only if null
+                ltp: p.ltp ?? p.buyAvg ?? 0,
                 type: (p.netQty ?? 0) >= 0 ? "LONG" : "SHORT",
                 status: qty === 0 ? "EXITED" : "ACTIVE",
                 category: "DAY"

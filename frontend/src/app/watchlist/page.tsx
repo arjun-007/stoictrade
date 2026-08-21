@@ -40,17 +40,21 @@ const MONTH_NAMES = ["JAN","FEB","MAR","APR","MAY","JUN","JUL","AUG","SEP","OCT"
  *   monthly format: yyMMM.toUpper()    e.g. "26AUG"
  */
 function parseExpiry(expiryStr: string): { day: string; month: string; year: string } {
-  // Monthly format: 5 chars like "26AUG"
-  if (/^\d{2}[A-Z]{3}$/.test(expiryStr)) {
-    const year = expiryStr.substring(0, 2);
-    const mon = expiryStr.substring(2, 5);
+  // Strip any accidental 'NIFTY' prefix that slips through from old cached data
+  let s = expiryStr;
+  if (s.startsWith("NIFTY")) s = s.substring(5);
+
+  // Monthly format: 5 chars like "26AUG" (yy + MMM)
+  if (/^\d{2}[A-Z]{3}$/.test(s)) {
+    const year = s.substring(0, 2);
+    const mon = s.substring(2, 5);
     return { day: "", month: mon, year };
   }
   // Weekly format: 5 chars like "26821" (yy + monthChar + dd)
-  if (/^\d{2}[0-9ONDond]\d{2}$/.test(expiryStr)) {
-    const year = expiryStr.substring(0, 2);
-    const mChar = expiryStr.substring(2, 3).toUpperCase();
-    const day = expiryStr.substring(3, 5);
+  if (/^\d{2}[0-9ONDond]\d{2}$/.test(s)) {
+    const year = s.substring(0, 2);
+    const mChar = s.substring(2, 3).toUpperCase();
+    const day = s.substring(3, 5);
     let monthIdx = parseInt(mChar);
     if (mChar === "O") monthIdx = 10;
     else if (mChar === "N") monthIdx = 11;
@@ -58,8 +62,8 @@ function parseExpiry(expiryStr: string): { day: string; month: string; year: str
     const monthName = MONTH_NAMES[(monthIdx - 1) % 12] || mChar;
     return { day, month: monthName, year };
   }
-  // Fallback: just return the raw string
-  return { day: "", month: expiryStr, year: "" };
+  // Fallback: return raw (minus any NIFTY prefix stripped above)
+  return { day: "", month: s, year: "" };
 }
 
 /**
@@ -77,15 +81,17 @@ function buildDisplayName(expiry: string, strike: number, type: string): string 
 function parseOptionChain(apiData: any): ParsedInstrument[] {
   const instruments: ParsedInstrument[] = [];
   
-  // Support both the .records.data structure and .data structure
+  // The backend returns: { records: { underlyingValue, data: [...] } }
+  // So apiData (which is data.options from /api/marketdata/all) has .records.data
   const records: any[] = apiData?.records?.data || apiData?.data || [];
 
   for (const row of records) {
     const strike: number = row.strikePrice ?? 0;
-    const expiry: string = row.expiryDate ?? "";
-    if (!strike || !expiry) continue;
+    const rawExpiry: string = row.expiryDate ?? "";
+    if (!strike || !rawExpiry) continue;
 
-    const displayBase = buildDisplayName(expiry, strike, "");
+    // Strip any NIFTY prefix that leaked into the expiry field from old parser
+    const expiry = rawExpiry.startsWith("NIFTY") ? rawExpiry.substring(5) : rawExpiry;
 
     if (row.CE) {
       const symbol = `NIFTY${expiry}${strike}CE`;

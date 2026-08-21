@@ -33,6 +33,20 @@ namespace StoicTrade.Api.Controllers
             return globalSettings != null && globalSettings.TradeMode == "Paper";
         }
 
+        /// <summary>
+        /// Resolves a canonical option symbol key from the stored PaperPosition symbol.
+        /// Handles cases where old positions stored double-NIFTY (e.g. "NIFTYNIFTY26AUG24000CE")
+        /// or NSE: prefix variants.
+        /// </summary>
+        private static string NormaliseOptionSymbol(string raw)
+        {
+            string s = raw;
+            if (s.StartsWith("NSE:", StringComparison.OrdinalIgnoreCase)) s = s.Substring(4);
+            // Collapse accidental double-NIFTY prefix: "NIFTYNIFTY..." → "NIFTY..."
+            if (s.StartsWith("NIFTYNIFTY", StringComparison.OrdinalIgnoreCase)) s = s.Substring(5);
+            return s;
+        }
+
         private (decimal totalPnL, int activeCount, List<object> mockNetPositions) GetMockPaperData()
         {
             var paperPositions = _dbContext.PaperPositions.ToList();
@@ -42,9 +56,13 @@ namespace StoicTrade.Api.Controllers
 
             foreach (var pos in paperPositions)
             {
+                // Normalise the symbol key before lookup (handles old DB entries with double NIFTY)
+                string canonicalSymbol = NormaliseOptionSymbol(pos.Symbol);
+
                 // Priority: individual option price cache → spot data → last trade avg
-                decimal ltp = _marketDataCache.GetOptionPrice(pos.Symbol)
-                    ?? _marketDataCache.GetSpotData(pos.Symbol)?.Price
+                decimal ltp = _marketDataCache.GetOptionPrice(canonicalSymbol)
+                    ?? _marketDataCache.GetOptionPrice(pos.Symbol)  // fallback: try raw
+                    ?? _marketDataCache.GetSpotData(canonicalSymbol)?.Price
                     ?? (pos.NetQty > 0 ? pos.BuyAvg : pos.SellAvg);
                 decimal unrealized = 0;
                 

@@ -109,53 +109,58 @@ namespace StoicTrade.Api.Services.MarketData
                         continue;
                     }
 
-                    // 3. Generate Option Symbols for +/- 5 strikes (Step size 50) for multiple expiries
+                    // 3. Generate Option Symbols across all expiries in batches of ≤48 symbols
                     int atmStrike = (int)Math.Round(niftySpotPrice / 50.0m) * 50;
-                    var optionSymbols = new List<string>();
                     var expiries = GetUpcomingExpiries();
-                    
-                    foreach (var expiry in expiries)
+
+                    // Batch: 4 strikes each side (9 strikes × 2 = 18 symbols) per expiry → 2 expiries per batch (36 sym)
+                    // This keeps each request comfortably under Fyers 50-symbol limit.
+                    const int StrikesEachSide = 4;
+                    const int ExpiryBatchSize = 2;
+                    var allOptionDocs = new List<JsonDocument>();
+
+                    for (int batchStart = 0; batchStart < expiries.Count; batchStart += ExpiryBatchSize)
                     {
-                        for (int i = -5; i <= 5; i++)
+                        var batchExpiries = expiries.Skip(batchStart).Take(ExpiryBatchSize).ToList();
+                        var batchSymbols = new List<string>();
+
+                        foreach (var expiry in batchExpiries)
                         {
-                            int strike = atmStrike + (i * 50);
-                            optionSymbols.Add($"NSE:NIFTY{expiry}{strike}CE");
-                            optionSymbols.Add($"NSE:NIFTY{expiry}{strike}PE");
+                            for (int i = -StrikesEachSide; i <= StrikesEachSide; i++)
+                            {
+                                int strike = atmStrike + (i * 50);
+                                batchSymbols.Add($"NSE:NIFTY{expiry}{strike}CE");
+                                batchSymbols.Add($"NSE:NIFTY{expiry}{strike}PE");
+                            }
                         }
+
+                        var batchQuery = string.Join(",", batchSymbols);
+                        try
+                        {
+                            var batchRes = await _httpClient.GetAsync($"https://api-t1.fyers.in/data/quotes?symbols={batchQuery}", stoppingToken);
+                            if (batchRes.IsSuccessStatusCode)
+                            {
+                                var batchJson = await batchRes.Content.ReadAsStringAsync(stoppingToken);
+                                allOptionDocs.Add(JsonDocument.Parse(batchJson));
+                            }
+                        }
+                        catch { /* skip failed batch */ }
+
+                        // Small delay between batches to avoid rate limiting
+                        if (batchStart + ExpiryBatchSize < expiries.Count)
+                            await Task.Delay(200, stoppingToken);
                     }
 
-                    // Query in batches if too many symbols, but Fyers allows up to 50 symbols. 
-                    // Actually Fyers allows comma separated. Let's limit the query to avoid URL too long.
-                    // If expiries count is large, this might exceed limits. We have ~4 expiries * 22 symbols = 88 symbols. Fyers quote API allows up to 50.
-                    // We'll just take the first 2 expiries for now to stay under 50. (2 * 22 = 44 symbols)
-                    var queryExpiries = expiries.Take(2).ToList();
-                    optionSymbols.Clear();
-                    foreach (var expiry in queryExpiries)
+                    if (allOptionDocs.Count > 0)
                     {
-                        for (int i = -5; i <= 5; i++)
-                        {
-                            int strike = atmStrike + (i * 50);
-                            optionSymbols.Add($"NSE:NIFTY{expiry}{strike}CE");
-                            optionSymbols.Add($"NSE:NIFTY{expiry}{strike}PE");
-                        }
-                    }
-
-                    var symbolQueryOpts = string.Join(",", optionSymbols);
-                    var optRes = await _httpClient.GetAsync($"https://api-t1.fyers.in/data/quotes?symbols={symbolQueryOpts}", stoppingToken);
-                    
-                    if (optRes.IsSuccessStatusCode)
-                    {
-                        var optJson = await optRes.Content.ReadAsStringAsync(stoppingToken);
-                        var optDoc = JsonDocument.Parse(optJson);
-                        
-                        // Map Fyers JSON back to NSE format for backward compatibility with Watchlist UI
-                        var mappedJson = MapFyersToNseFormat(optDoc, niftySpotPrice);
+                        // Merge all batch docs and update cache
+                        var mappedJson = MapFyersToNseFormatMulti(allOptionDocs, niftySpotPrice);
                         _cache.UpdateOptionChainData("NIFTY", mappedJson);
-                        
-                        // Also cache each individual option contract LTP so portfolio positions can get live LTP
-                        CacheIndividualOptionPrices(optDoc);
-                        
-                        _logger.LogDebug($"Fyers Poller: Updated Option Chain around {atmStrike}");
+
+                        foreach (var doc in allOptionDocs)
+                            CacheIndividualOptionPrices(doc);
+
+                        _logger.LogDebug($"Fyers Poller: Updated {allOptionDocs.Count} batches, {expiries.Count} expiries around {atmStrike}");
                     }
                 }
                 catch (Exception ex)
@@ -170,85 +175,118 @@ namespace StoicTrade.Api.Services.MarketData
             _logger.LogInformation("Fyers Data Polling Service is stopping.");
         }
 
-        private string MapFyersToNseFormat(JsonDocument fyersDoc, decimal spotPrice)
+        /// <summary>
+        /// Normalises a Fyers option symbol to extract just the expiry+strike+type part.
+        /// Fyers short_name can be: "NSE:NIFTY26AUG24250CE", "NIFTY26AUG24250CE", or "26AUG24250CE".
+        /// We always want actualExpiry = "26AUG", strike = 24250, type = "CE".
+        /// </summary>
+        private static bool TryParseOptionSymbol(string? raw, out string actualExpiry, out int strike, out string type)
         {
-            var dataArray = fyersDoc.RootElement.GetProperty("d");
-            // strikesMap[expiry][strike][type]
+            actualExpiry = ""; strike = 0; type = "";
+            if (string.IsNullOrEmpty(raw) || raw == "NIFTY50-INDEX") return false;
+
+            // Strip known prefixes so we always work with "26AUG24250CE" or "2682124250CE"
+            string s = raw;
+            if (s.StartsWith("NSE:NIFTY")) s = s.Substring(9);
+            else if (s.StartsWith("NSE:"))    s = s.Substring(4);
+            if (s.StartsWith("NIFTY"))       s = s.Substring(5);
+
+            if (s.Length < 6) return false;
+
+            type = s.EndsWith("CE") ? "CE" : s.EndsWith("PE") ? "PE" : "";
+            if (string.IsNullOrEmpty(type)) return false;
+
+            string noSuffix = s.Substring(0, s.Length - 2); // remove CE/PE
+
+            // Count trailing digits → strike
+            int strikeLen = 0;
+            for (int i = noSuffix.Length - 1; i >= 0; i--)
+            {
+                if (char.IsDigit(noSuffix[i])) strikeLen++;
+                else break;
+            }
+            if (strikeLen == 0) return false;
+
+            if (!int.TryParse(noSuffix.Substring(noSuffix.Length - strikeLen), out strike)) return false;
+            actualExpiry = noSuffix.Substring(0, noSuffix.Length - strikeLen);
+            return true;
+        }
+
+        private static Dictionary<string, Dictionary<int, Dictionary<string, object>>> BuildStrikesMap(JsonDocument fyersDoc)
+        {
             var strikesMap = new Dictionary<string, Dictionary<int, Dictionary<string, object>>>();
+            var dataArray = fyersDoc.RootElement.GetProperty("d");
 
             foreach (var item in dataArray.EnumerateArray())
             {
                 if (item.TryGetProperty("s", out var sProp) && sProp.GetString() == "error") continue;
-
                 var v = item.GetProperty("v");
                 if (v.ValueKind == JsonValueKind.Null) continue;
+                if (!v.TryGetProperty("short_name", out var snProp)) continue;
 
-                if (!v.TryGetProperty("short_name", out var shortNameProp)) continue;
-                var symbol = shortNameProp.GetString();
-                if (symbol == "NIFTY50-INDEX" || string.IsNullOrEmpty(symbol)) continue;
+                if (!TryParseOptionSymbol(snProp.GetString(), out var expiry, out var strike, out var type)) continue;
+                if (!v.TryGetProperty("lp", out var lpProp) || !v.TryGetProperty("chp", out var chpProp)) continue;
 
-                try
-                {
-                    // symbol format: NSE:NIFTY26AUG23850CE or NSE:NIFTY2682023850CE
-                    string noPrefix = symbol.StartsWith("NSE:NIFTY") ? symbol.Substring(9) : symbol;
-                    string type = noPrefix.EndsWith("CE") ? "CE" : "PE";
-                    string noSuffix = noPrefix.Substring(0, noPrefix.Length - 2);
-                    
-                    int strikeLength = 0;
-                    for (int i = noSuffix.Length - 1; i >= 0; i--)
-                    {
-                        if (char.IsDigit(noSuffix[i])) strikeLength++;
-                        else break;
-                    }
-                    
-                    if (strikeLength == 0) continue;
-                    
-                    string strikeStr = noSuffix.Substring(noSuffix.Length - strikeLength);
-                    string actualExpiry = noSuffix.Substring(0, noSuffix.Length - strikeLength);
-                    int strike = int.Parse(strikeStr);
+                decimal lp = lpProp.GetDecimal();
+                decimal change = chpProp.GetDecimal();
 
-                    if (!v.TryGetProperty("lp", out var lpProp) || !v.TryGetProperty("chp", out var chpProp)) continue;
-                    
-                    decimal lp = lpProp.GetDecimal();
-                    decimal change = chpProp.GetDecimal();
+                if (!strikesMap.ContainsKey(expiry))
+                    strikesMap[expiry] = new Dictionary<int, Dictionary<string, object>>();
+                if (!strikesMap[expiry].ContainsKey(strike))
+                    strikesMap[expiry][strike] = new Dictionary<string, object>();
 
-                    if (!strikesMap.ContainsKey(actualExpiry))
-                        strikesMap[actualExpiry] = new Dictionary<int, Dictionary<string, object>>();
-
-                    if (!strikesMap[actualExpiry].ContainsKey(strike))
-                        strikesMap[actualExpiry][strike] = new Dictionary<string, object>();
-
-                    strikesMap[actualExpiry][strike][type] = new { lastPrice = lp, change = change };
-                }
-                catch { }
+                strikesMap[expiry][strike][type] = new { lastPrice = lp, change = change };
             }
+            return strikesMap;
+        }
 
-            var recordsData = new List<object>();
-            foreach (var expiryKvp in strikesMap)
+        private string MapFyersToNseFormatMulti(IEnumerable<JsonDocument> fyersDocs, decimal spotPrice)
+        {
+            // Merge all batch documents into one strikes map
+            var merged = new Dictionary<string, Dictionary<int, Dictionary<string, object>>>();
+            foreach (var doc in fyersDocs)
             {
-                var expiry = expiryKvp.Key;
+                var map = BuildStrikesMap(doc);
+                foreach (var (expiry, strikes) in map)
+                {
+                    if (!merged.ContainsKey(expiry)) merged[expiry] = new Dictionary<int, Dictionary<string, object>>();
+                    foreach (var (strike, types) in strikes)
+                    {
+                        if (!merged[expiry].ContainsKey(strike)) merged[expiry][strike] = new Dictionary<string, object>();
+                        foreach (var (t, v) in types) merged[expiry][strike][t] = v;
+                    }
+                }
+            }
+            return SerialiseStrikesMap(merged, spotPrice);
+        }
+
+        private string MapFyersToNseFormat(JsonDocument fyersDoc, decimal spotPrice)
+        {
+            return SerialiseStrikesMap(BuildStrikesMap(fyersDoc), spotPrice);
+        }
+
+        private static string SerialiseStrikesMap(Dictionary<string, Dictionary<int, Dictionary<string, object>>> strikesMap, decimal spotPrice)
+        {
+            var recordsData = new List<object>();
+            // Sort expiries then strikes
+            foreach (var expiryKvp in strikesMap.OrderBy(e => e.Key))
+            {
                 foreach (var strikeKvp in expiryKvp.Value.OrderBy(x => x.Key))
                 {
                     recordsData.Add(new
                     {
                         strikePrice = strikeKvp.Key,
-                        expiryDate = expiry,
+                        expiryDate = expiryKvp.Key,
                         CE = strikeKvp.Value.ContainsKey("CE") ? strikeKvp.Value["CE"] : null,
                         PE = strikeKvp.Value.ContainsKey("PE") ? strikeKvp.Value["PE"] : null
                     });
                 }
             }
 
-            var result = new
+            return JsonSerializer.Serialize(new
             {
-                records = new
-                {
-                    underlyingValue = spotPrice,
-                    data = recordsData
-                }
-            };
-
-            return JsonSerializer.Serialize(result);
+                records = new { underlyingValue = spotPrice, data = recordsData }
+            });
         }
 
         private void CacheIndividualOptionPrices(JsonDocument fyersDoc)
@@ -262,14 +300,14 @@ namespace StoicTrade.Api.Services.MarketData
                     var v = item.GetProperty("v");
                     if (v.ValueKind == JsonValueKind.Null) continue;
                     if (!v.TryGetProperty("short_name", out var snProp)) continue;
-                    var symbol = snProp.GetString();
-                    if (string.IsNullOrEmpty(symbol) || symbol == "NIFTY50-INDEX") continue;
 
-                    // Canonical key: strip NSE: prefix → e.g. "NIFTY26AUG23850CE"
-                    string key = symbol.StartsWith("NSE:") ? symbol.Substring(4) : symbol;
+                    if (!TryParseOptionSymbol(snProp.GetString(), out var expiry, out var strike, out var type)) continue;
                     if (!v.TryGetProperty("lp", out var lpProp)) continue;
                     decimal lp = lpProp.GetDecimal();
-                    _cache.UpdateOptionPrice(key, lp);
+
+                    // Store under canonical key "NIFTY{expiry}{strike}{type}" e.g. "NIFTY26AUG24250CE"
+                    string canonicalKey = $"NIFTY{expiry}{strike}{type}";
+                    _cache.UpdateOptionPrice(canonicalKey, lp);
                 }
             }
             catch (Exception ex)
@@ -281,24 +319,44 @@ namespace StoicTrade.Api.Services.MarketData
         private List<string> GetUpcomingExpiries()
         {
             var expiries = new List<string>();
-            DateTime today = DateTime.UtcNow.Date;
-            
-            // Generate next 4 Thursdays
+            // Use IST to match NSE trading calendar
+            var ist = TimeZoneInfo.FindSystemTimeZoneById("India Standard Time");
+            DateTime today = TimeZoneInfo.ConvertTimeFromUtc(DateTime.UtcNow, ist).Date;
+
+            // ── Weekly expiries: next 4 Thursdays ──────────────────────────────
+            int daysUntilThursday = ((int)DayOfWeek.Thursday - (int)today.DayOfWeek + 7) % 7;
+            if (daysUntilThursday == 0) daysUntilThursday = 7; // already Thursday → go to next week
+
             for (int i = 0; i < 4; i++)
             {
-                int daysUntilThursday = ((int)DayOfWeek.Thursday - (int)today.DayOfWeek + 7) % 7;
-                if (daysUntilThursday == 0 && DateTime.UtcNow.Hour > 15) daysUntilThursday = 7;
                 DateTime thurs = today.AddDays(daysUntilThursday + (i * 7));
-                
                 int month = thurs.Month;
-                string monthChar = month <= 9 ? month.ToString() : (month == 10 ? "O" : (month == 11 ? "N" : "D"));
-                string weeklyFormat = $"{thurs.ToString("yy")}{monthChar}{thurs.ToString("dd")}";
-                string monthlyFormat = thurs.ToString("yyMMM").ToUpper();
-                
-                expiries.Add(weeklyFormat);
-                expiries.Add(monthlyFormat);
+                string monthChar = month <= 9 ? month.ToString()
+                    : month == 10 ? "O" : month == 11 ? "N" : "D";
+                expiries.Add($"{thurs:yy}{monthChar}{thurs:dd}");
             }
+
+            // ── Monthly expiries: last Thursday of current + next 5 months ─────
+            for (int m = 0; m < 6; m++)
+            {
+                var monthStart = new DateTime(today.Year, today.Month, 1).AddMonths(m);
+                DateTime lastThurs = GetLastThursdayOfMonth(monthStart);
+
+                // Skip if it's the same as a weekly expiry already added
+                string monthlyFmt = lastThurs.ToString("yyMMM").ToUpper();
+                expiries.Add(monthlyFmt);
+            }
+
             return expiries.Distinct().ToList();
+        }
+
+        /// <summary>Returns the last Thursday of the month containing <paramref name="anyDayInMonth"/>.</summary>
+        private static DateTime GetLastThursdayOfMonth(DateTime anyDayInMonth)
+        {
+            var lastDay = new DateTime(anyDayInMonth.Year, anyDayInMonth.Month,
+                DateTime.DaysInMonth(anyDayInMonth.Year, anyDayInMonth.Month));
+            int daysBack = ((int)lastDay.DayOfWeek - (int)DayOfWeek.Thursday + 7) % 7;
+            return lastDay.AddDays(-daysBack);
         }
     }
 }
