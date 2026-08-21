@@ -99,9 +99,14 @@ export default function PositionsPage() {
   });
 
   const totalPnL = filteredData.reduce((acc, pos) => {
-    const currentPrice = pos.status === "EXITED" && pos.sellPrice ? pos.sellPrice : pos.ltp;
-    const pnl = (currentPrice - pos.buyPrice) * pos.qty;
-    return acc + (pos.type === "LONG" ? pnl : -pnl);
+    const entryPrice = pos.type === "LONG" ? pos.buyPrice : (pos.sellPrice ?? 0);
+    const currentPrice = pos.type === "LONG"
+      ? (pos.status === "EXITED" && pos.sellPrice ? pos.sellPrice : pos.ltp)
+      : (pos.status === "EXITED" && pos.buyPrice ? pos.buyPrice : pos.ltp);
+    const pnl = pos.type === "LONG"
+      ? (currentPrice - entryPrice) * pos.qty
+      : (entryPrice - currentPrice) * pos.qty;
+    return acc + pnl;
   }, 0);
 
   return (
@@ -189,9 +194,13 @@ export default function PositionsPage() {
                 </tr>
               ) : (
                 filteredData.map((pos) => {
-                  const currentPrice = pos.status === "EXITED" && pos.sellPrice ? pos.sellPrice : pos.ltp;
-                  const rawPnl = (currentPrice - pos.buyPrice) * pos.qty;
-                  const pnl = pos.type === "LONG" ? rawPnl : -rawPnl;
+                  const entryPrice = pos.type === "LONG" ? pos.buyPrice : (pos.sellPrice ?? 0);
+                  const currentPrice = pos.type === "LONG"
+                    ? (pos.status === "EXITED" && pos.sellPrice ? pos.sellPrice : pos.ltp)
+                    : (pos.status === "EXITED" && pos.buyPrice ? pos.buyPrice : pos.ltp);
+                  const pnl = pos.type === "LONG"
+                    ? (currentPrice - entryPrice) * pos.qty
+                    : (entryPrice - currentPrice) * pos.qty;
                   const isProfit = pnl >= 0;
                   
                   return (
@@ -216,7 +225,7 @@ export default function PositionsPage() {
                         </span>
                       </td>
                       <td className="p-4 text-right font-medium">{pos.qty}</td>
-                      <td className="p-4 text-right text-slate-600 dark:text-slate-400">₹{pos.buyPrice.toFixed(2)}</td>
+                      <td className="p-4 text-right text-slate-600 dark:text-slate-400">₹{entryPrice.toFixed(2)}</td>
                       <td className="p-4 text-right font-medium">₹{currentPrice.toFixed(2)}</td>
                       <td className={`p-4 text-right font-bold ${isProfit ? 'text-green-500' : 'text-danger'}`}>
                         {isProfit ? '+' : ''}₹{pnl.toFixed(2)}

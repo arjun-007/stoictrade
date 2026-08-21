@@ -70,7 +70,7 @@ namespace StoicTrade.Api.Controllers
                 else if (pos.NetQty < 0) unrealized = (pos.SellAvg - ltp) * Math.Abs(pos.NetQty);
 
                 netPositions.Add(new {
-                    symbol = pos.Symbol,
+                    symbol = NormaliseOptionSymbol(pos.Symbol),
                     netQty = pos.NetQty,
                     buyAvg = pos.BuyAvg,
                     sellAvg = pos.SellAvg,

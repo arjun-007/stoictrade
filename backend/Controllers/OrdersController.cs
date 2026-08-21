@@ -7,6 +7,14 @@ namespace StoicTrade.Api.Controllers
     [Route("api/[controller]")]
     public class OrdersController : ControllerBase
     {
+        private static string NormaliseSymbol(string raw)
+        {
+            string s = raw;
+            if (s.StartsWith("NSE:", StringComparison.OrdinalIgnoreCase)) s = s.Substring(4);
+            if (s.StartsWith("NIFTYNIFTY", StringComparison.OrdinalIgnoreCase)) s = s.Substring(5);
+            return s;
+        }
+
         [HttpPost]
         public async Task<IActionResult> PlaceOrder([FromBody] OrderRequest request, [FromServices] StoicTrade.Api.Data.AppDbContext dbContext)
         {
@@ -19,14 +27,15 @@ namespace StoicTrade.Api.Controllers
             var settings = await Microsoft.EntityFrameworkCore.EntityFrameworkQueryableExtensions.FirstOrDefaultAsync(dbContext.GlobalSettings);
             if (settings != null && settings.TradeMode == "Paper")
             {
+                var normalisedInstrument = NormaliseSymbol(request.Instrument);
                 var resolver = HttpContext.RequestServices.GetRequiredService<StoicTrade.Api.Services.Strategies.OptionSelectionEngine>();
-                var ltp = resolver.ResolveOptionLtp(request.Instrument) ?? 0m;
+                var ltp = resolver.ResolveOptionLtp(normalisedInstrument) ?? 0m;
                 
                 var trade = new StoicTrade.Api.Models.TradeLog
                 {
                     OrderId = Guid.NewGuid().ToString("N").Substring(0, 10).ToUpper(),
                     StrategyName = "Manual",
-                    Instrument = request.Instrument,
+                    Instrument = normalisedInstrument,
                     TradeType = request.OrderType,
                     Quantity = request.Quantity,
                     ExecutionPrice = ltp > 0 ? ltp : 100m, // Mock fallback if parsing fails
@@ -36,10 +45,10 @@ namespace StoicTrade.Api.Controllers
                 
                 dbContext.TradeLogs.Add(trade);
                 
-                var position = await Microsoft.EntityFrameworkCore.EntityFrameworkQueryableExtensions.FirstOrDefaultAsync(dbContext.PaperPositions, p => p.Symbol == request.Instrument);
+                var position = await Microsoft.EntityFrameworkCore.EntityFrameworkQueryableExtensions.FirstOrDefaultAsync(dbContext.PaperPositions, p => p.Symbol == normalisedInstrument);
                 if (position == null)
                 {
-                    position = new StoicTrade.Api.Models.PaperPosition { Symbol = request.Instrument };
+                    position = new StoicTrade.Api.Models.PaperPosition { Symbol = normalisedInstrument };
                     dbContext.PaperPositions.Add(position);
                 }
 
@@ -64,11 +73,23 @@ namespace StoicTrade.Api.Controllers
                         position.RealizedProfit += (trade.ExecutionPrice - position.BuyAvg) * request.Quantity;
                     }
                 }
+
+                if (position.NetQty == 0)
+                {
+                    // Reset accumulators for next trade in same symbol
+                    position.TotalBuyQty = 0;
+                    position.TotalSellQty = 0;
+                    position.TotalBuyValue = 0;
+                    position.TotalSellValue = 0;
+                    position.BuyAvg = 0;
+                    position.SellAvg = 0;
+                }
+
                 position.UpdatedAt = DateTime.UtcNow;
 
                 await dbContext.SaveChangesAsync();
                 
-                return Ok(new { Message = $"[PAPER] Order for {request.Instrument} filled at CMP: {trade.ExecutionPrice}" });
+                return Ok(new { Message = $"[PAPER] Order for {normalisedInstrument} filled at CMP: {trade.ExecutionPrice}" });
             }
 
             // Proceed to place order with Fyers API (mocked for now)

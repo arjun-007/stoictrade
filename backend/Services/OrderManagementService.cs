@@ -19,6 +19,14 @@ namespace StoicTrade.Api.Services
             _serviceProvider = serviceProvider;
         }
 
+        private static string NormaliseSymbol(string raw)
+        {
+            string s = raw;
+            if (s.StartsWith("NSE:", System.StringComparison.OrdinalIgnoreCase)) s = s.Substring(4);
+            if (s.StartsWith("NIFTYNIFTY", System.StringComparison.OrdinalIgnoreCase)) s = s.Substring(5);
+            return s;
+        }
+
         public async Task ExecuteOrderAsync(Signal signal)
         {
             using var scope = _serviceProvider.CreateScope();
@@ -27,13 +35,14 @@ namespace StoicTrade.Api.Services
             
             if (globalSettings != null && globalSettings.TradeMode == "Paper")
             {
+                var normalisedInstrument = NormaliseSymbol(signal.Instrument);
                 _logger.LogInformation("OrderManagementService [PAPER]: Executing mock order for {Action} {Quantity} {Instrument} at {ExpectedPrice}", 
-                    signal.Action, signal.Quantity, signal.Instrument, signal.ExpectedPrice);
+                    signal.Action, signal.Quantity, normalisedInstrument, signal.ExpectedPrice);
                     
-                var position = dbContext.PaperPositions.FirstOrDefault(p => p.Symbol == signal.Instrument);
+                var position = dbContext.PaperPositions.FirstOrDefault(p => p.Symbol == normalisedInstrument);
                 if (position == null)
                 {
-                    position = new PaperPosition { Symbol = signal.Instrument };
+                    position = new PaperPosition { Symbol = normalisedInstrument };
                     dbContext.PaperPositions.Add(position);
                 }
 
