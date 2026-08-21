@@ -51,13 +51,20 @@ namespace StoicTrade.Api.Controllers
 
         private (decimal totalPnL, int activeCount, List<object> mockNetPositions) GetMockPaperData()
         {
+            var rawNifty = _dbContext.PaperPositions.Where(p => p.Symbol == "NIFTY").ToList();
+            if (rawNifty.Any())
+            {
+                _dbContext.PaperPositions.RemoveRange(rawNifty);
+                try { _dbContext.SaveChanges(); } catch {}
+            }
+
             var paperPositions = _dbContext.PaperPositions.ToList();
             var netPositions = new List<object>();
             decimal totalPnL = 0;
             int activePositionsCount = 0;
 
             var grouped = paperPositions
-                .Where(p => !string.IsNullOrWhiteSpace(p.Symbol))
+                .Where(p => !string.IsNullOrWhiteSpace(p.Symbol) && p.Symbol != "NIFTY")
                 .GroupBy(p => NormaliseOptionSymbol(p.Symbol));
 
             foreach (var group in grouped)

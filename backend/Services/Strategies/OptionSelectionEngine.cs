@@ -19,9 +19,9 @@ namespace StoicTrade.Api.Services.Strategies
 
         /// <summary>
         /// Selects the optimal option contract based on underlying bias (BULLISH/BEARISH).
-        /// Replaces hard-coded strategy logic.
+        /// Supports target expiry index (e.g. 0 = current week, 1 = 2nd expiry week) and ITM distance (e.g. 1 = 1 strike ITM).
         /// </summary>
-        public string? GetOptimalContract(string underlyingSymbol, string bias, int itmDistance = 0)
+        public string? GetOptimalContract(string underlyingSymbol, string bias, int itmDistance = 1, int expiryIndex = 1)
         {
             var rawJson = _cache.GetOptionChainData(underlyingSymbol);
             var spotData = _cache.GetSpotData(underlyingSymbol);
@@ -43,28 +43,29 @@ namespace StoicTrade.Api.Services.Strategies
                     decimal spotPrice = spotData.Price;
                     int atmStrike = (int)Math.Round(spotPrice / 50.0m) * 50;
                     
-                    // Simple ITM logic
-                    int targetStrike = atmStrike;
+                    // ITM logic:
+                    // CE (BULLISH): Strike is lower than ATM (In-The-Money)
+                    // PE (BEARISH): Strike is higher than ATM (In-The-Money)
                     string optionType = bias == "BULLISH" ? "CE" : "PE";
+                    int targetStrike = optionType == "CE" 
+                        ? atmStrike - (itmDistance * 50) 
+                        : atmStrike + (itmDistance * 50);
 
-                    if (optionType == "CE")
-                    {
-                        targetStrike -= (itmDistance * 50); // Lower strike for ITM CE
-                    }
-                    else
-                    {
-                        targetStrike += (itmDistance * 50); // Higher strike for ITM PE
-                    }
+                    // Collect all distinct expiries
+                    var distinctExpiries = dataArray.EnumerateArray()
+                        .Select(x => x.TryGetProperty("expiryDate", out var e) ? e.GetString() : null)
+                        .Where(x => !string.IsNullOrEmpty(x))
+                        .Distinct()
+                        .ToList();
 
-                    // Grab the expiry date from the first record
-                    var firstRecord = dataArray.EnumerateArray().FirstOrDefault();
-                    if (firstRecord.ValueKind != JsonValueKind.Undefined && firstRecord.TryGetProperty("expiryDate", out var expiryEl))
-                    {
-                        string expiry = expiryEl.GetString() ?? "";
-                        
-                        // Format: NSE:NIFTY26AUG22000CE
-                        return $"NSE:{underlyingSymbol}{expiry}{targetStrike}{optionType}";
-                    }
+                    if (!distinctExpiries.Any()) return null;
+
+                    // Select the requested expiry (e.g. expiryIndex = 1 for 2nd expiry / next week)
+                    string chosenExpiry = (expiryIndex >= 0 && expiryIndex < distinctExpiries.Count)
+                        ? distinctExpiries[expiryIndex]
+                        : distinctExpiries.First();
+
+                    return $"NSE:{underlyingSymbol}{chosenExpiry}{targetStrike}{optionType}";
                 }
             }
             catch (Exception ex)

@@ -92,16 +92,19 @@ namespace StoicTrade.Api.Services.Strategies
                             var signal = await strategy.ExecuteAsync(config, marketDataJson);
                             if (signal != null)
                             {
-                                // If signal is for NIFTY underlying, select the optimal ATM option contract
-                                if (signal.Instrument == "NIFTY")
+                                // If signal is for NIFTY underlying, select the optimal 2nd weekly ITM option contract
+                                if (signal.Instrument == "NIFTY" || (!signal.Instrument.Contains("CE") && !signal.Instrument.Contains("PE")))
                                 {
                                     string bias = signal.Action == "BUY" ? "BULLISH" : "BEARISH";
-                                    var contract = optionEngine.GetOptimalContract("NIFTY", bias, 0);
+                                    var contract = optionEngine.GetOptimalContract("NIFTY", bias, itmDistance: 1, expiryIndex: 1)
+                                        ?? optionEngine.GetOptimalContract("NIFTY", bias, itmDistance: 1, expiryIndex: 0);
                                     if (!string.IsNullOrEmpty(contract))
                                     {
                                         string optSymbol = contract.Replace("NSE:", "");
                                         signal.Instrument = optSymbol;
-                                        signal.Price = optionEngine.ResolveOptionLtp(optSymbol) ?? signal.Price;
+                                        var optLtp = optionEngine.ResolveOptionLtp(optSymbol);
+                                        signal.Price = (optLtp.HasValue && optLtp.Value > 0) ? optLtp.Value : 150m;
+                                        signal.ExpectedPrice = signal.Price;
                                     }
                                 }
 
