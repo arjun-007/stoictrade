@@ -21,9 +21,11 @@ namespace StoicTrade.Api.Services
 
         private static string NormaliseSymbol(string raw)
         {
-            string s = raw;
+            if (string.IsNullOrWhiteSpace(raw)) return string.Empty;
+            string s = raw.Trim();
             if (s.StartsWith("NSE:", System.StringComparison.OrdinalIgnoreCase)) s = s.Substring(4);
             if (s.StartsWith("NIFTYNIFTY", System.StringComparison.OrdinalIgnoreCase)) s = s.Substring(5);
+            s = s.Replace(" ", "");
             return s;
         }
 

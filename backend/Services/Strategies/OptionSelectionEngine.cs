@@ -77,8 +77,15 @@ namespace StoicTrade.Api.Services.Strategies
 
         public decimal? ResolveOptionLtp(string symbol)
         {
-            // Dummy logic for now, in reality you'd search the JSON for the exact symbol string
-            return _cache.GetSpotData("NIFTY")?.Price; 
+            if (string.IsNullOrWhiteSpace(symbol)) return null;
+            string canonical = symbol.Trim();
+            if (canonical.StartsWith("NSE:", StringComparison.OrdinalIgnoreCase)) canonical = canonical.Substring(4);
+            if (canonical.StartsWith("NIFTYNIFTY", StringComparison.OrdinalIgnoreCase)) canonical = canonical.Substring(5);
+            canonical = canonical.Replace(" ", "");
+
+            return _cache.GetOptionPrice(canonical)
+                ?? _cache.GetOptionPrice(symbol)
+                ?? _cache.GetSpotData(canonical)?.Price;
         }
     }
 }

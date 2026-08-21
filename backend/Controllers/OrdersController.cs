@@ -9,9 +9,11 @@ namespace StoicTrade.Api.Controllers
     {
         private static string NormaliseSymbol(string raw)
         {
-            string s = raw;
+            if (string.IsNullOrWhiteSpace(raw)) return string.Empty;
+            string s = raw.Trim();
             if (s.StartsWith("NSE:", StringComparison.OrdinalIgnoreCase)) s = s.Substring(4);
             if (s.StartsWith("NIFTYNIFTY", StringComparison.OrdinalIgnoreCase)) s = s.Substring(5);
+            s = s.Replace(" ", "");
             return s;
         }
 
@@ -30,6 +32,9 @@ namespace StoicTrade.Api.Controllers
                 var normalisedInstrument = NormaliseSymbol(request.Instrument);
                 var resolver = HttpContext.RequestServices.GetRequiredService<StoicTrade.Api.Services.Strategies.OptionSelectionEngine>();
                 var ltp = resolver.ResolveOptionLtp(normalisedInstrument) ?? 0m;
+                decimal executionPrice = (request.EntryPrice.HasValue && request.EntryPrice.Value > 0)
+                    ? request.EntryPrice.Value
+                    : (ltp > 0 ? ltp : 100m);
                 
                 var trade = new StoicTrade.Api.Models.TradeLog
                 {
@@ -38,18 +43,26 @@ namespace StoicTrade.Api.Controllers
                     Instrument = normalisedInstrument,
                     TradeType = request.OrderType,
                     Quantity = request.Quantity,
-                    ExecutionPrice = ltp > 0 ? ltp : 100m, // Mock fallback if parsing fails
+                    ExecutionPrice = executionPrice,
                     Timestamp = DateTime.UtcNow,
                     Status = "EXECUTED"
                 };
                 
                 dbContext.TradeLogs.Add(trade);
                 
-                var position = await Microsoft.EntityFrameworkCore.EntityFrameworkQueryableExtensions.FirstOrDefaultAsync(dbContext.PaperPositions, p => p.Symbol == normalisedInstrument);
+                // Match by normalized symbol or exact symbol
+                var allPositions = await Microsoft.EntityFrameworkCore.EntityFrameworkQueryableExtensions.ToListAsync(dbContext.PaperPositions);
+                var position = allPositions.FirstOrDefault(p => NormaliseSymbol(p.Symbol) == normalisedInstrument);
+                
                 if (position == null)
                 {
                     position = new StoicTrade.Api.Models.PaperPosition { Symbol = normalisedInstrument };
                     dbContext.PaperPositions.Add(position);
+                }
+                else
+                {
+                    // Standardize symbol in database if it was legacy/un-normalized
+                    position.Symbol = normalisedInstrument;
                 }
 
                 if (request.OrderType == "BUY")
@@ -102,5 +115,6 @@ namespace StoicTrade.Api.Controllers
         public string Instrument { get; set; } = string.Empty;
         public int Quantity { get; set; }
         public string OrderType { get; set; } = string.Empty;
+        public decimal? EntryPrice { get; set; }
     }
 }

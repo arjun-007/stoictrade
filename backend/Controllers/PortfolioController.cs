@@ -36,14 +36,16 @@ namespace StoicTrade.Api.Controllers
         /// <summary>
         /// Resolves a canonical option symbol key from the stored PaperPosition symbol.
         /// Handles cases where old positions stored double-NIFTY (e.g. "NIFTYNIFTY26AUG24000CE")
-        /// or NSE: prefix variants.
+        /// or NSE: prefix variants or spaces.
         /// </summary>
         private static string NormaliseOptionSymbol(string raw)
         {
-            string s = raw;
+            if (string.IsNullOrWhiteSpace(raw)) return string.Empty;
+            string s = raw.Trim();
             if (s.StartsWith("NSE:", StringComparison.OrdinalIgnoreCase)) s = s.Substring(4);
             // Collapse accidental double-NIFTY prefix: "NIFTYNIFTY..." → "NIFTY..."
             if (s.StartsWith("NIFTYNIFTY", StringComparison.OrdinalIgnoreCase)) s = s.Substring(5);
+            s = s.Replace(" ", "");
             return s;
         }
 
@@ -54,36 +56,59 @@ namespace StoicTrade.Api.Controllers
             decimal totalPnL = 0;
             int activePositionsCount = 0;
 
-            foreach (var pos in paperPositions)
+            var grouped = paperPositions
+                .Where(p => !string.IsNullOrWhiteSpace(p.Symbol))
+                .GroupBy(p => NormaliseOptionSymbol(p.Symbol));
+
+            foreach (var group in grouped)
             {
-                // Normalise the symbol key before lookup (handles old DB entries with double NIFTY)
-                string canonicalSymbol = NormaliseOptionSymbol(pos.Symbol);
+                string canonicalSymbol = group.Key;
+                int netQty = group.Sum(p => p.NetQty);
+                decimal realizedProfit = group.Sum(p => p.RealizedProfit);
 
                 // Priority: individual option price cache → spot data → last trade avg
-                decimal ltp = _marketDataCache.GetOptionPrice(canonicalSymbol)
-                    ?? _marketDataCache.GetOptionPrice(pos.Symbol)  // fallback: try raw
-                    ?? _marketDataCache.GetSpotData(canonicalSymbol)?.Price
-                    ?? (pos.NetQty > 0 ? pos.BuyAvg : pos.SellAvg);
-                decimal unrealized = 0;
+                decimal? cachedLtp = _marketDataCache.GetOptionPrice(canonicalSymbol);
                 
-                if (pos.NetQty > 0) unrealized = (ltp - pos.BuyAvg) * pos.NetQty;
-                else if (pos.NetQty < 0) unrealized = (pos.SellAvg - ltp) * Math.Abs(pos.NetQty);
+                decimal buyAvg = group.FirstOrDefault(p => p.BuyAvg > 0 && p.BuyAvg < 5000)?.BuyAvg 
+                    ?? group.FirstOrDefault(p => p.BuyAvg > 0)?.BuyAvg 
+                    ?? 0m;
+                    
+                decimal sellAvg = group.FirstOrDefault(p => p.SellAvg > 0 && p.SellAvg < 5000)?.SellAvg 
+                    ?? (cachedLtp.HasValue ? cachedLtp.Value : 0m);
+
+                // If sellAvg was stored as spot price (> 5000), fix it using option LTP
+                if (sellAvg > 5000 && cachedLtp.HasValue)
+                {
+                    sellAvg = cachedLtp.Value;
+                }
+                if (buyAvg > 5000 && cachedLtp.HasValue)
+                {
+                    buyAvg = cachedLtp.Value;
+                }
+
+                decimal ltp = cachedLtp
+                    ?? _marketDataCache.GetSpotData(canonicalSymbol)?.Price
+                    ?? (netQty > 0 ? buyAvg : sellAvg);
+
+                decimal unrealized = 0;
+                if (netQty > 0) unrealized = (ltp - buyAvg) * netQty;
+                else if (netQty < 0) unrealized = (sellAvg - ltp) * Math.Abs(netQty);
 
                 netPositions.Add(new {
-                    symbol = NormaliseOptionSymbol(pos.Symbol),
-                    netQty = pos.NetQty,
-                    buyAvg = pos.BuyAvg,
-                    sellAvg = pos.SellAvg,
+                    symbol = canonicalSymbol,
+                    netQty = netQty,
+                    buyAvg = buyAvg,
+                    sellAvg = sellAvg,
                     ltp = ltp,
-                    realized_profit = pos.RealizedProfit,
+                    realized_profit = realizedProfit,
                     unrealized_profit = unrealized,
-                    pl = pos.RealizedProfit + unrealized,
+                    pl = realizedProfit + unrealized,
                     slNo = 1,
-                    id = pos.Id
+                    id = group.First().Id
                 });
 
-                totalPnL += (pos.RealizedProfit + unrealized);
-                if (pos.NetQty != 0) activePositionsCount++;
+                totalPnL += (realizedProfit + unrealized);
+                if (netQty != 0) activePositionsCount++;
             }
 
             return (totalPnL, activePositionsCount, netPositions);

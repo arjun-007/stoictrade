@@ -442,7 +442,8 @@ export default function WatchlistPage() {
 
       {selectedInstrument && (
         <OrderModal
-          instrument={selectedInstrument.displayName || selectedInstrument.symbol}
+          instrument={selectedInstrument.symbol}
+          displayName={selectedInstrument.displayName}
           price={selectedInstrument.price}
           change={selectedInstrument.change}
           onClose={() => setSelectedInstrument(null)}

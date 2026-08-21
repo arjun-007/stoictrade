@@ -6,12 +6,13 @@ import { fetchWithAuth } from "@/lib/api";
 
 interface OrderModalProps {
   instrument: string;
+  displayName?: string;
   price?: number;
   change?: number;
   onClose: () => void;
 }
 
-export default function OrderModal({ instrument, price = 0, change = 0, onClose }: OrderModalProps) {
+export default function OrderModal({ instrument, displayName, price = 0, change = 0, onClose }: OrderModalProps) {
   const [quantity, setQuantity] = useState(65);
   const [baseLotSize, setBaseLotSize] = useState(65);
   const [orderType, setOrderType] = useState<"BUY" | "SELL">("BUY");
@@ -47,7 +48,7 @@ export default function OrderModal({ instrument, price = 0, change = 0, onClose 
         quantity,
         orderType,
         orderMode,
-        entryPrice: orderMode === "LIMIT" ? Number(entryPrice) : null,
+        entryPrice: orderMode === "LIMIT" && entryPrice ? Number(entryPrice) : (price > 0 ? price : null),
         stoploss: stoploss ? Number(stoploss) : null,
         target: target ? Number(target) : null
       };
@@ -83,7 +84,7 @@ export default function OrderModal({ instrument, price = 0, change = 0, onClose 
       <div className="fixed z-50 bg-surface w-full md:w-[450px] max-w-full bottom-0 md:bottom-auto md:top-1/2 left-1/2 -translate-x-1/2 md:-translate-y-1/2 rounded-t-3xl md:rounded-2xl shadow-2xl p-6 transition-transform transform max-h-[90vh] overflow-y-auto">
         <div className="flex justify-between items-start mb-6">
           <div>
-            <h2 className="text-xl font-bold">{instrument}</h2>
+            <h2 className="text-xl font-bold">{displayName || instrument}</h2>
             <p className="text-sm text-slate-500 mb-2">Place Order</p>
             <div className="flex items-center gap-3">
               <span className="text-2xl font-bold text-slate-900 dark:text-white">₹ {price.toFixed(2)}</span>
