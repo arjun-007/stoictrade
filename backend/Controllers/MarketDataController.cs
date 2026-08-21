@@ -51,6 +51,9 @@ namespace StoicTrade.Api.Controllers
                 {
                     spots[sym] = new {
                         lastPrice = spot.Price,
+                        prevClose = spot.PrevClose,
+                        change = spot.Change,
+                        changePercent = spot.ChangePercent,
                         timestamp = spot.Timestamp
                     };
                 }

@@ -16,9 +16,15 @@ const navItems = [
   { name: 'Settings', href: '/settings', icon: Settings }
 ];
 
+interface SpotInfo {
+  price: number;
+  change?: number;
+  changePercent?: number;
+}
+
 export default function Navigation() {
   const pathname = usePathname();
-  const [niftySpot, setNiftySpot] = useState<number | null>(null);
+  const [niftySpot, setNiftySpot] = useState<SpotInfo | null>(null);
 
   useEffect(() => {
     const fetchSpot = async () => {
@@ -26,7 +32,14 @@ export default function Navigation() {
         const res = await fetchWithAuth("/api/marketdata/spot?symbol=NIFTY");
         if (res.ok) {
           const data = await res.json();
-          setNiftySpot(data.price ?? data.lastPrice ?? null);
+          const p = data.price ?? data.lastPrice;
+          if (p !== undefined) {
+            setNiftySpot({
+              price: p,
+              change: data.change,
+              changePercent: data.changePercent
+            });
+          }
         }
       } catch {}
     };
@@ -60,8 +73,15 @@ export default function Navigation() {
                 Live
               </span>
             </div>
-            <div className="text-lg font-bold text-slate-900 dark:text-white mt-0.5">
-              {niftySpot !== null ? `₹ ${niftySpot.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : "Loading..."}
+            <div className="flex items-baseline flex-wrap gap-1.5 mt-0.5">
+              <span className="text-lg font-bold text-slate-900 dark:text-white">
+                {niftySpot !== null ? `₹ ${niftySpot.price.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : "Loading..."}
+              </span>
+              {niftySpot !== null && niftySpot.change !== undefined && (
+                <span className={`text-xs font-semibold ${niftySpot.change >= 0 ? "text-green-500" : "text-rose-500"}`}>
+                  ({niftySpot.change >= 0 ? `+${niftySpot.change.toFixed(2)}` : niftySpot.change.toFixed(2)})
+                </span>
+              )}
             </div>
           </div>
         </div>

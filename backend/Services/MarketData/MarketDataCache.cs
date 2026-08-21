@@ -10,9 +10,19 @@ namespace StoicTrade.Api.Services.MarketData
         // Individual option contract prices, keyed by canonical symbol e.g. "NIFTY26AUG23850CE"
         private readonly ConcurrentDictionary<string, decimal> _optionPrices = new();
 
-        public void UpdateSpotData(string symbol, decimal price, DateTime timestamp)
+        public void UpdateSpotData(string symbol, decimal price, DateTime timestamp, decimal prevClose = 0, decimal change = 0, decimal changePercent = 0)
         {
-            _spotData[symbol] = new SpotData { Symbol = symbol, Price = price, Timestamp = timestamp };
+            decimal ch = change != 0 ? change : (prevClose > 0 ? price - prevClose : 0);
+            decimal chp = changePercent != 0 ? changePercent : (prevClose > 0 ? ((price - prevClose) / prevClose) * 100m : 0);
+            _spotData[symbol] = new SpotData
+            {
+                Symbol = symbol,
+                Price = price,
+                PrevClose = prevClose,
+                Change = Math.Round(ch, 2),
+                ChangePercent = Math.Round(chp, 2),
+                Timestamp = timestamp
+            };
         }
 
         public void UpdateOptionChainData(string symbol, string rawJson)
@@ -52,6 +62,9 @@ namespace StoicTrade.Api.Services.MarketData
     {
         public string Symbol { get; set; } = string.Empty;
         public decimal Price { get; set; }
+        public decimal PrevClose { get; set; }
+        public decimal Change { get; set; }
+        public decimal ChangePercent { get; set; }
         public DateTime Timestamp { get; set; }
     }
 }

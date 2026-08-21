@@ -42,8 +42,10 @@ interface PendingApproval {
 }
 
 interface SpotData {
-  price: number;
-  lastPrice: number;
+  price?: number;
+  lastPrice?: number;
+  change?: number;
+  changePercent?: number;
 }
 
 // ─── Status helpers ───────────────────────────────────────────────────────────
@@ -83,7 +85,7 @@ export default function StrategyAnalysisPage() {
   const [strategies, setStrategies]     = useState<StrategyConfig[]>([]);
   const [signalLog, setSignalLog]       = useState<SignalLogEntry[]>([]);
   const [pending, setPending]           = useState<PendingApproval[]>([]);
-  const [niftySpot, setNiftySpot]       = useState<number | null>(null);
+  const [niftySpot, setNiftySpot]       = useState<SpotData | null>(null);
   const [loading, setLoading]           = useState(true);
   const [lastRefresh, setLastRefresh]   = useState<Date>(new Date());
   const [newSignalIds, setNewSignalIds] = useState<Set<string>>(new Set());
@@ -134,7 +136,7 @@ export default function StrategyAnalysisPage() {
 
       if (spotRes.ok) {
         const spot: SpotData = await spotRes.json();
-        setNiftySpot(spot.price ?? spot.lastPrice ?? null);
+        setNiftySpot(spot);
       }
 
       setLastRefresh(new Date());
@@ -199,7 +201,16 @@ export default function StrategyAnalysisPage() {
           {niftySpot !== null && (
             <div className="text-right">
               <p className="text-xs text-slate-500 font-semibold uppercase tracking-wider">NIFTY Spot</p>
-              <p className="text-2xl font-bold text-slate-900 dark:text-white">₹ {niftySpot.toFixed(2)}</p>
+              <div className="flex items-baseline justify-end gap-1.5 mt-0.5">
+                <span className="text-2xl font-bold text-slate-900 dark:text-white">
+                  ₹ {(niftySpot.price ?? niftySpot.lastPrice ?? 0).toFixed(2)}
+                </span>
+                {niftySpot.change !== undefined && (
+                  <span className={`text-xs font-semibold ${niftySpot.change >= 0 ? "text-green-500" : "text-rose-500"}`}>
+                    ({niftySpot.change >= 0 ? `+${niftySpot.change.toFixed(2)}` : niftySpot.change.toFixed(2)})
+                  </span>
+                )}
+              </div>
             </div>
           )}
           <div className="text-right text-xs text-slate-400">

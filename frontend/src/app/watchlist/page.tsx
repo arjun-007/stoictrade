@@ -145,7 +145,7 @@ export default function WatchlistPage() {
   const [search, setSearch] = useState("");
   const [searchFocused, setSearchFocused] = useState(false);
   const [liveInstruments, setLiveInstruments] = useState<ParsedInstrument[]>([]);
-  const [niftySpot, setNiftySpot] = useState<number | null>(null);
+  const [niftySpot, setNiftySpot] = useState<{ price: number; change?: number; changePercent?: number } | null>(null);
   const [dataLoading, setDataLoading] = useState(true);
   const [selectedInstrument, setSelectedInstrument] = useState<WatchlistItem | null>(null);
   const searchRef = useRef<HTMLDivElement>(null);
@@ -189,10 +189,16 @@ export default function WatchlistPage() {
         const data = await res.json();
 
         // Parse spot price
-        const spot = data.options?.records?.underlyingValue
+        const spotPrice = data.options?.records?.underlyingValue
           ?? data.options?.underlyingValue
           ?? (data.spots?.NIFTY?.lastPrice || null);
-        setNiftySpot(spot);
+        if (spotPrice !== null) {
+          setNiftySpot({
+            price: spotPrice,
+            change: data.spots?.NIFTY?.change,
+            changePercent: data.spots?.NIFTY?.changePercent
+          });
+        }
 
         // Parse ALL option chain records (not just ATM ±5)
         const optionsPayload = data.options;
@@ -226,7 +232,7 @@ export default function WatchlistPage() {
   const query = search.trim().toLowerCase();
 
   // If search is empty and bar is focused, show ATM ± 3 strikes as suggestions
-  const atmStrike = niftySpot ? Math.round(niftySpot / 50) * 50 : 0;
+  const atmStrike = niftySpot ? Math.round(niftySpot.price / 50) * 50 : 0;
 
     const searchResults: ParsedInstrument[] = (() => {
     if (!searchFocused) return [];
@@ -307,8 +313,17 @@ export default function WatchlistPage() {
         <div className="flex items-center gap-3">
           {niftySpot && (
             <div className="text-right px-3 py-2 bg-slate-50 dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700">
-              <p className="text-xs text-slate-500 font-semibold">NIFTY</p>
-              <p className="font-bold text-slate-900 dark:text-white">₹ {niftySpot.toFixed(2)}</p>
+              <p className="text-xs text-slate-500 font-semibold uppercase tracking-wider text-[11px]">NIFTY SPOT</p>
+              <div className="flex items-baseline gap-1.5 mt-0.5">
+                <span className="font-bold text-slate-900 dark:text-white">
+                  ₹ {niftySpot.price.toFixed(2)}
+                </span>
+                {niftySpot.change !== undefined && (
+                  <span className={`text-xs font-semibold ${niftySpot.change >= 0 ? "text-green-500" : "text-rose-500"}`}>
+                    ({niftySpot.change >= 0 ? `+${niftySpot.change.toFixed(2)}` : niftySpot.change.toFixed(2)})
+                  </span>
+                )}
+              </div>
             </div>
           )}
           <button

@@ -82,6 +82,9 @@ namespace StoicTrade.Api.Services.MarketData
                         {
                             var v = item.GetProperty("v");
                             var lp = v.GetProperty("lp").GetDecimal();
+                            decimal prevClose = v.TryGetProperty("prev_close_price", out var pcProp) ? pcProp.GetDecimal() : 0m;
+                            decimal ch = v.TryGetProperty("ch", out var chProp) ? chProp.GetDecimal() : (prevClose > 0 ? lp - prevClose : 0m);
+                            decimal chp = v.TryGetProperty("chp", out var chpProp) ? chpProp.GetDecimal() : (prevClose > 0 ? ((lp - prevClose) / prevClose) * 100m : 0m);
                             string queryName = item.TryGetProperty("n", out var nProp) ? nProp.GetString() ?? "" : "";
                             string sym = v.TryGetProperty("symbol", out var sProp) ? sProp.GetString() ?? "" : "";
                             string shortName = v.TryGetProperty("short_name", out var snProp) ? snProp.GetString() ?? "" : "";
@@ -91,8 +94,8 @@ namespace StoicTrade.Api.Services.MarketData
                             if (rawName.Contains("NIFTY", StringComparison.OrdinalIgnoreCase))
                             {
                                 niftySpotPrice = lp;
-                                _cache.UpdateSpotData("NIFTY", lp, DateTime.UtcNow);
-                                _cache.UpdateSpotData("NIFTY50-INDEX", lp, DateTime.UtcNow);
+                                _cache.UpdateSpotData("NIFTY", lp, DateTime.UtcNow, prevClose, ch, chp);
+                                _cache.UpdateSpotData("NIFTY50-INDEX", lp, DateTime.UtcNow, prevClose, ch, chp);
                                 if (!_isAggregatorInitialized)
                                 {
                                     await _aggregator.InitializeSymbolAsync("NSE:NIFTY50-INDEX", new[] { 1, 5, 15 }, niftySpotPrice);
@@ -103,7 +106,7 @@ namespace StoicTrade.Api.Services.MarketData
                             else
                             {
                                 string cleanKey = rawName.Replace("NSE:", "").Replace("-EQ", "").Trim();
-                                _cache.UpdateSpotData(cleanKey, lp, DateTime.UtcNow);
+                                _cache.UpdateSpotData(cleanKey, lp, DateTime.UtcNow, prevClose, ch, chp);
                             }
                         }
                     }

@@ -78,7 +78,7 @@ export default function PositionsPage() {
   const [filterType, setFilterType] = useState<PositionType | "ALL">("ALL");
 
   const [positionsData, setPositionsData] = useState<Position[]>([]);
-  const [niftySpot, setNiftySpot] = useState<number | null>(null);
+  const [niftySpot, setNiftySpot] = useState<{ price: number; change?: number; changePercent?: number } | null>(null);
 
   useEffect(() => {
     const fetchPositions = async () => {
@@ -91,7 +91,14 @@ export default function PositionsPage() {
 
         if (spotRes.ok) {
           const spotData = await spotRes.json();
-          setNiftySpot(spotData.price ?? spotData.lastPrice ?? null);
+          const p = spotData.price ?? spotData.lastPrice;
+          if (p !== undefined) {
+            setNiftySpot({
+              price: p,
+              change: spotData.change,
+              changePercent: spotData.changePercent
+            });
+          }
         }
 
         let mapped: Position[] = [];
@@ -188,9 +195,16 @@ export default function PositionsPage() {
                 Live
               </span>
             </div>
-            <p className="text-xl font-bold text-slate-900 dark:text-white">
-              {niftySpot !== null ? `₹ ${niftySpot.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : "—"}
-            </p>
+            <div className="flex items-baseline justify-end gap-1.5 mt-0.5">
+              <span className="text-xl font-bold text-slate-900 dark:text-white">
+                {niftySpot !== null ? `₹ ${niftySpot.price.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : "—"}
+              </span>
+              {niftySpot !== null && niftySpot.change !== undefined && (
+                <span className={`text-xs font-semibold ${niftySpot.change >= 0 ? "text-green-500" : "text-rose-500"}`}>
+                  ({niftySpot.change >= 0 ? `+${niftySpot.change.toFixed(2)}` : niftySpot.change.toFixed(2)})
+                </span>
+              )}
+            </div>
           </div>
 
           <div className="text-right">
