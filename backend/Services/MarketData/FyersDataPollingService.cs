@@ -344,12 +344,11 @@ namespace StoicTrade.Api.Services.MarketData
         {
             var expiries = new List<string>();
             // Use IST to match NSE trading calendar
-            var ist = TimeZoneInfo.FindSystemTimeZoneById("India Standard Time");
+            var ist = TimeZoneHelper.GetIstTimeZone();
             DateTime today = TimeZoneInfo.ConvertTimeFromUtc(DateTime.UtcNow, ist).Date;
 
             // ── Weekly expiries: next 4 Thursdays ──────────────────────────────
             int daysUntilThursday = ((int)DayOfWeek.Thursday - (int)today.DayOfWeek + 7) % 7;
-            if (daysUntilThursday == 0) daysUntilThursday = 7; // already Thursday → go to next week
 
             for (int i = 0; i < 4; i++)
             {

@@ -39,7 +39,7 @@ namespace StoicTrade.Api.Controllers
 
             if (!bypassTimeLock)
             {
-                var istZone = TimeZoneInfo.FindSystemTimeZoneById("India Standard Time");
+                var istZone = StoicTrade.Api.Services.TimeZoneHelper.GetIstTimeZone();
                 var nowIst = TimeZoneInfo.ConvertTimeFromUtc(DateTime.UtcNow, istZone);
                 
                 // Rule 1: Hard Time Lock (Weekdays, 06:00-09:30 and 15:10-16:00 IST)

@@ -40,7 +40,7 @@ namespace StoicTrade.Api.Services
             }
 
             // 2. Check Time Window
-            var istZone = TimeZoneInfo.FindSystemTimeZoneById("India Standard Time");
+            var istZone = TimeZoneHelper.GetIstTimeZone();
             var nowIst = TimeZoneInfo.ConvertTimeFromUtc(DateTime.UtcNow, istZone);
             var currentTime = nowIst.TimeOfDay;
 
