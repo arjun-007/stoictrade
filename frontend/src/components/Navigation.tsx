@@ -62,25 +62,35 @@ export default function Navigation() {
   }, [pathname]);
 
   useEffect(() => {
-    const fetchSpot = async () => {
+    let isRunning = false;
+
+    const checkStatusAndSpot = async () => {
       try {
-        const res = await fetchWithAuth("/api/marketdata/spot?symbol=NIFTY");
-        if (res.ok) {
-          const data = await res.json();
-          const p = data.price ?? data.lastPrice;
-          if (p !== undefined) {
-            setNiftySpot({
-              price: p,
-              change: data.change,
-              changePercent: data.changePercent
-            });
+        const statusRes = await fetchWithAuth("/api/engine/status");
+        if (statusRes.ok) {
+          const statusData = await statusRes.json();
+          isRunning = statusData.isRunning === true || statusData.IsRunning === true;
+        }
+
+        if (isRunning) {
+          const res = await fetchWithAuth("/api/marketdata/spot?symbol=NIFTY");
+          if (res.ok) {
+            const data = await res.json();
+            const p = data.price ?? data.lastPrice;
+            if (p !== undefined && p > 0) {
+              setNiftySpot({
+                price: p,
+                change: data.change,
+                changePercent: data.changePercent
+              });
+            }
           }
         }
       } catch {}
     };
 
-    fetchSpot();
-    const interval = setInterval(fetchSpot, 3000);
+    checkStatusAndSpot();
+    const interval = setInterval(checkStatusAndSpot, 6000);
     return () => clearInterval(interval);
   }, []);
 

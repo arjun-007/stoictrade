@@ -104,9 +104,21 @@ export default function StrategyAnalysisPage() {
       .catch(() => setLoading(false));
   }, []);
 
-  // ── Poll live data every 2 seconds ─────────────────────────────────────────
+  // ── Poll live data when engine is running ───────────────────────────────────
   const poll = useCallback(async () => {
     try {
+      const statusRes = await fetchWithAuth("/api/engine/status");
+      let isRunning = false;
+      if (statusRes.ok) {
+        const s = await statusRes.json();
+        isRunning = s.isRunning === true || s.IsRunning === true;
+      }
+
+      if (!isRunning) {
+        setLastRefresh(new Date());
+        return;
+      }
+
       const [signalsRes, pendingRes, spotRes] = await Promise.all([
         fetchWithAuth("/api/engine/signals"),
         fetchWithAuth("/api/approval/pending"),
@@ -145,7 +157,7 @@ export default function StrategyAnalysisPage() {
 
   useEffect(() => {
     poll();
-    const interval = setInterval(poll, 2000);
+    const interval = setInterval(poll, 6000);
     return () => clearInterval(interval);
   }, [poll]);
 

@@ -81,18 +81,33 @@ export default function PositionsPage() {
   const [niftySpot, setNiftySpot] = useState<{ price: number; change?: number; changePercent?: number } | null>(null);
 
   useEffect(() => {
+    let isRunning = false;
+
     const fetchPositions = async () => {
       try {
-        const [posRes, holdRes, spotRes] = await Promise.all([
-          fetchWithAuth("/api/portfolio/positions"),
-          fetchWithAuth("/api/portfolio/holdings"),
-          fetchWithAuth("/api/marketdata/spot?symbol=NIFTY")
-        ]);
+        const statusRes = await fetchWithAuth("/api/engine/status");
+        if (statusRes.ok) {
+          const statusData = await statusRes.json();
+          isRunning = statusData.isRunning === true || statusData.IsRunning === true;
+        }
 
-        if (spotRes.ok) {
+        const promises: Promise<Response>[] = [
+          fetchWithAuth("/api/portfolio/positions"),
+          fetchWithAuth("/api/portfolio/holdings")
+        ];
+        if (isRunning) {
+          promises.push(fetchWithAuth("/api/marketdata/spot?symbol=NIFTY"));
+        }
+
+        const results = await Promise.all(promises);
+        const posRes = results[0];
+        const holdRes = results[1];
+        const spotRes = results.length > 2 ? results[2] : null;
+
+        if (spotRes && spotRes.ok) {
           const spotData = await spotRes.json();
           const p = spotData.price ?? spotData.lastPrice;
-          if (p !== undefined) {
+          if (p !== undefined && p > 0) {
             setNiftySpot({
               price: p,
               change: spotData.change,
@@ -103,7 +118,7 @@ export default function PositionsPage() {
 
         let mapped: Position[] = [];
 
-        if (posRes.ok) {
+        if (posRes && posRes.ok) {
           const data = await posRes.json();
           if (data.netPositions) {
             data.netPositions.forEach((p: any) => {
@@ -127,7 +142,7 @@ export default function PositionsPage() {
           }
         }
 
-        if (holdRes.ok) {
+        if (holdRes && holdRes.ok) {
           const data = await holdRes.json();
           if (data.holdings) {
             data.holdings.forEach((h: any) => {
@@ -136,6 +151,7 @@ export default function PositionsPage() {
                 symbol: h.symbol ?? "-",
                 qty: h.quantity ?? 0,
                 buyPrice: h.costPrice ?? 0,
+                sellPrice: 0,
                 ltp: h.ltp ?? h.costPrice ?? 0,
                 type: "LONG",
                 status: "ACTIVE",
@@ -152,7 +168,7 @@ export default function PositionsPage() {
     };
     
     fetchPositions();
-    const interval = setInterval(fetchPositions, 5000);
+    const interval = setInterval(fetchPositions, 8000);
     return () => clearInterval(interval);
   }, []);
 

@@ -20,7 +20,10 @@ namespace StoicTrade.Api.Controllers
         public IActionResult GetSpotData([FromQuery] string symbol = "NIFTY")
         {
             var data = _cache.GetSpotData(symbol);
-            if (data == null) return NotFound(new { Message = "Spot data not available yet." });
+            if (data == null) 
+            {
+                return Ok(new SpotData { Symbol = symbol, Price = 0, Change = 0, ChangePercent = 0, Timestamp = DateTime.UtcNow });
+            }
             return Ok(data);
         }
 
@@ -38,7 +41,15 @@ namespace StoicTrade.Api.Controllers
         public IActionResult GetAllMarketData()
         {
             var rawJson = _cache.GetOptionChainData("NIFTY");
-            var optionsData = rawJson != null ? System.Text.Json.JsonDocument.Parse(rawJson).RootElement : default;
+            object? optionsData = null;
+            if (!string.IsNullOrEmpty(rawJson))
+            {
+                try
+                {
+                    optionsData = System.Text.Json.JsonDocument.Parse(rawJson).RootElement;
+                }
+                catch { /* Ignore parse error */ }
+            }
 
             var spots = new System.Collections.Generic.Dictionary<string, object>();
             

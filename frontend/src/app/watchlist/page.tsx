@@ -179,12 +179,28 @@ export default function WatchlistPage() {
     return () => document.removeEventListener("mousedown", handler);
   }, []);
 
-  // ── Poll market data every 3s ──────────────────────────────────────────────
+  // ── Poll market data when engine is running ───────────────────────────────
   useEffect(() => {
+    let isRunning = false;
+
     const fetchData = async () => {
       try {
+        const statusRes = await fetchWithAuth("/api/engine/status");
+        if (statusRes.ok) {
+          const statusData = await statusRes.json();
+          isRunning = statusData.isRunning === true || statusData.IsRunning === true;
+        }
+
+        if (!isRunning) {
+          setDataLoading(false);
+          return;
+        }
+
         const res = await fetchWithAuth("/api/marketdata/all");
-        if (!res.ok) return;
+        if (!res.ok) {
+          setDataLoading(false);
+          return;
+        }
 
         const data = await res.json();
 
@@ -192,7 +208,7 @@ export default function WatchlistPage() {
         const spotPrice = data.options?.records?.underlyingValue
           ?? data.options?.underlyingValue
           ?? (data.spots?.NIFTY?.lastPrice || null);
-        if (spotPrice !== null) {
+        if (spotPrice !== null && spotPrice > 0) {
           setNiftySpot({
             price: spotPrice,
             change: data.spots?.NIFTY?.change,
@@ -202,26 +218,27 @@ export default function WatchlistPage() {
 
         // Parse ALL option chain records (not just ATM ±5)
         const optionsPayload = data.options;
-        const instruments = parseOptionChain(optionsPayload);
-        setLiveInstruments(instruments);
-        setDataLoading(false);
+        if (optionsPayload) {
+          const instruments = parseOptionChain(optionsPayload);
+          setLiveInstruments(instruments);
 
-        // Update prices of existing watchlist items
-        setWatchlists(prev => prev.map(wl => ({
-          ...wl,
-          items: wl.items.map(item => {
-            const live = instruments.find(i => i.symbol === item.symbol);
-            return live ? { ...item, price: live.price, change: live.change } : item;
-          })
-        })));
+          // Update prices of existing watchlist items
+          setWatchlists(prev => prev.map(wl => ({
+            ...wl,
+            items: wl.items.map(item => {
+              const live = instruments.find(i => i.symbol === item.symbol);
+              return live ? { ...item, price: live.price, change: live.change } : item;
+            })
+          })));
+        }
+        setDataLoading(false);
       } catch (e) {
-        console.error("Watchlist: failed to fetch live data", e);
         setDataLoading(false);
       }
     };
 
     fetchData();
-    const interval = setInterval(fetchData, 3000);
+    const interval = setInterval(fetchData, 6000);
     return () => clearInterval(interval);
   }, []);
 
