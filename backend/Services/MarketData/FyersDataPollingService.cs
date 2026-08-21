@@ -49,11 +49,31 @@ namespace StoicTrade.Api.Services.MarketData
             {
                 try
                 {
-                    // 1. Ensure we have a valid token
+                    // 1. If engine is stopped, DO NOT poll external APIs to reduce hosting and network costs
+                    if (!_fyersApi.IsEngineRunning)
+                    {
+                        await Task.Delay(5000, stoppingToken);
+                        continue;
+                    }
+
+                    // 2. Off-market check (>= 3:40 PM or < 9:15 AM IST)
+                    var ist = StoicTrade.Api.Services.TimeZoneHelper.GetIstTimeZone();
+                    var nowIst = TimeZoneInfo.ConvertTimeFromUtc(DateTime.UtcNow, ist).TimeOfDay;
+                    var autoStopCutoff = new TimeSpan(15, 40, 0); // 3:40 PM IST
+                    var marketOpen = new TimeSpan(9, 15, 0);      // 9:15 AM IST
+
+                    if (nowIst >= autoStopCutoff || nowIst < marketOpen)
+                    {
+                        _logger.LogInformation("Fyers Poller: Off-market hours (>= 3:40 PM or < 9:15 AM IST). Disconnecting engine.");
+                        _fyersApi.Disconnect();
+                        await Task.Delay(10000, stoppingToken);
+                        continue;
+                    }
+
+                    // 3. Ensure we have a valid token
                     var token = _fyersApi.GetAccessToken();
                     if (string.IsNullOrEmpty(token))
                     {
-                        _logger.LogWarning("Fyers Poller: Waiting for access token...");
                         await Task.Delay(5000, stoppingToken);
                         continue;
                     }

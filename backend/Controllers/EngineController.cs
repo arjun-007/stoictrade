@@ -13,9 +13,12 @@ namespace StoicTrade.Api.Controllers
     {
         private readonly FyersApiService _fyersApi;
 
-        public EngineController(FyersApiService fyersApi)
+        private readonly StoicTrade.Api.Data.AppDbContext _dbContext;
+
+        public EngineController(FyersApiService fyersApi, StoicTrade.Api.Data.AppDbContext dbContext)
         {
             _fyersApi = fyersApi;
+            _dbContext = dbContext;
         }
 
         [HttpGet("status")]
@@ -27,6 +30,13 @@ namespace StoicTrade.Api.Controllers
         [HttpPost("start")]
         public IActionResult StartEngine()
         {
+            var globalSettings = _dbContext.GlobalSettings.FirstOrDefault();
+            if (globalSettings != null && globalSettings.TradeMode == "Paper")
+            {
+                _fyersApi.StartPaperEngine();
+                return Ok(new { Message = "Paper Trading Engine started successfully.", IsRunning = true });
+            }
+
             var authUrl = _fyersApi.GetAuthUrl();
             return Ok(new { Message = "Please authenticate with Fyers to start the engine.", AuthUrl = authUrl });
         }
@@ -49,7 +59,15 @@ namespace StoicTrade.Api.Controllers
         public IActionResult StopEngine()
         {
             _fyersApi.Disconnect();
-            return Ok(new { Message = "Engine stopped successfully." });
+            return Ok(new { Message = "Engine stopped successfully.", IsRunning = false });
+        }
+
+        [HttpPost("squareoff")]
+        [Authorize]
+        public async Task<IActionResult> ManualSquareOff([FromServices] OrderManagementService orderManager)
+        {
+            int closed = await orderManager.AutoSquareOffAllPositionsAsync("Manual_UI_SquareOff");
+            return Ok(new { Message = $"Square-off completed. Closed {closed} positions." });
         }
 
         /// <summary>

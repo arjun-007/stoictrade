@@ -100,10 +100,17 @@ namespace StoicTrade.Api.Services
             return builder.ToString();
         }
 
+        public void StartPaperEngine()
+        {
+            _logger.LogInformation("Fyers API: Starting engine in Paper Trading mode...");
+            IsEngineRunning = true;
+        }
+
         public void Disconnect()
         {
-            _logger.LogInformation("Fyers API: Disconnecting engine...");
+            _logger.LogInformation("Fyers API: Disconnecting engine and clearing active session...");
             IsEngineRunning = false;
+            _accessToken = null;
         }
 
         public async Task<JsonElement> GetFundsAsync()

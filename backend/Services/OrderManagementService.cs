@@ -108,5 +108,85 @@ namespace StoicTrade.Api.Services
 
             await _fyersApiService.PlaceOrderAsync(signal.Instrument, signal.Action, signal.Quantity, signal.ExpectedPrice);
         }
+
+        public async Task<int> AutoSquareOffAllPositionsAsync(string reason = "AutoSquareOff_310PM")
+        {
+            using var scope = _serviceProvider.CreateScope();
+            var dbContext = scope.ServiceProvider.GetRequiredService<StoicTrade.Api.Data.AppDbContext>();
+            var globalSettings = dbContext.GlobalSettings.FirstOrDefault();
+            var optionEngine = scope.ServiceProvider.GetRequiredService<StoicTrade.Api.Services.Strategies.OptionSelectionEngine>();
+            int closedCount = 0;
+
+            if (globalSettings != null && globalSettings.TradeMode == "Paper")
+            {
+                var openPositions = dbContext.PaperPositions.Where(p => p.NetQty != 0).ToList();
+                foreach (var pos in openPositions)
+                {
+                    decimal exitPrice = optionEngine.ResolveOptionLtp(pos.Symbol) ?? (pos.BuyAvg > 0 ? pos.BuyAvg : 150m);
+                    int exitQty = System.Math.Abs(pos.NetQty);
+
+                    if (pos.NetQty > 0) // Long -> SELL to close
+                    {
+                        pos.TotalSellQty += exitQty;
+                        pos.TotalSellValue += exitQty * exitPrice;
+                        pos.SellAvg = pos.TotalSellQty > 0 ? pos.TotalSellValue / pos.TotalSellQty : exitPrice;
+                    }
+                    else if (pos.NetQty < 0) // Short -> BUY to close
+                    {
+                        pos.TotalBuyQty += exitQty;
+                        pos.TotalBuyValue += exitQty * exitPrice;
+                        pos.BuyAvg = pos.TotalBuyQty > 0 ? pos.TotalBuyValue / pos.TotalBuyQty : exitPrice;
+                    }
+
+                    pos.NetQty = 0;
+                    pos.RealizedProfit += (pos.TotalSellValue - pos.TotalBuyValue);
+                    pos.UpdatedAt = System.DateTime.UtcNow;
+                    closedCount++;
+
+                    _logger.LogInformation("AutoSquareOff [PAPER]: Closed position {Symbol} at ₹{ExitPrice} (Reason: {Reason})",
+                        pos.Symbol, exitPrice, reason);
+                }
+
+                if (closedCount > 0)
+                {
+                    await dbContext.SaveChangesAsync();
+                }
+                return closedCount;
+            }
+
+            // Live Mode Square-off
+            if (_fyersApiService.IsEngineRunning)
+            {
+                try
+                {
+                    var positionsJson = await _fyersApiService.GetPositionsAsync();
+                    if (positionsJson.ValueKind != System.Text.Json.JsonValueKind.Undefined && 
+                        positionsJson.TryGetProperty("netPositions", out var netPositionsArray))
+                    {
+                        foreach (var p in netPositionsArray.EnumerateArray())
+                        {
+                            int netQty = p.TryGetProperty("netQty", out var nq) ? nq.GetInt32() : 0;
+                            string symbol = p.TryGetProperty("symbol", out var s) ? s.GetString() ?? "" : "";
+
+                            if (netQty != 0 && !string.IsNullOrEmpty(symbol))
+                            {
+                                string exitAction = netQty > 0 ? "SELL" : "BUY";
+                                int exitQty = System.Math.Abs(netQty);
+                                await _fyersApiService.PlaceOrderAsync(symbol, exitAction, exitQty, 0);
+                                closedCount++;
+                                _logger.LogInformation("AutoSquareOff [LIVE]: Sent exit order {Action} {Qty} for {Symbol} (Reason: {Reason})",
+                                    exitAction, exitQty, symbol, reason);
+                            }
+                        }
+                    }
+                }
+                catch (System.Exception ex)
+                {
+                    _logger.LogError(ex, "AutoSquareOff [LIVE]: Error while closing live positions.");
+                }
+            }
+
+            return closedCount;
+        }
     }
 }

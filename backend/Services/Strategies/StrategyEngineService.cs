@@ -38,6 +38,7 @@ namespace StoicTrade.Api.Services.Strategies
         // Static log of the last 100 signals — accessible via EngineController
         public static readonly ConcurrentQueue<SignalLogEntry> RecentSignals = new();
         private const int MaxLogSize = 100;
+        private DateTime? _lastSquareOffDate = null;
 
         public StrategyEngineService(
             ILogger<StrategyEngineService> logger,
@@ -59,21 +60,46 @@ namespace StoicTrade.Api.Services.Strategies
             {
                 try
                 {
-                    // Daily 3:40 PM IST auto-stop schedule check
                     var ist = StoicTrade.Api.Services.TimeZoneHelper.GetIstTimeZone();
-                    var nowIst = TimeZoneInfo.ConvertTimeFromUtc(DateTime.UtcNow, ist).TimeOfDay;
+                    var nowUtc = DateTime.UtcNow;
+                    var nowIstDateTime = TimeZoneInfo.ConvertTimeFromUtc(nowUtc, ist);
+                    var nowIst = nowIstDateTime.TimeOfDay;
+                    var todayIst = nowIstDateTime.Date;
+
+                    var squareOffTime = new TimeSpan(15, 10, 0); // 3:10 PM IST
                     var autoStopCutoff = new TimeSpan(15, 40, 0); // 3:40 PM IST
                     var marketOpen = new TimeSpan(9, 15, 0);      // 9:15 AM IST
 
+                    // 1. Daily 3:10 PM IST Auto-Square-Off for active positions (Paper & Live)
+                    if (nowIst >= squareOffTime && nowIst < autoStopCutoff)
+                    {
+                        if (_lastSquareOffDate != todayIst)
+                        {
+                            _logger.LogInformation("Daily 3:10 PM IST reached. Triggering Auto-Square-Off for all active positions.");
+                            using var autoScope = _serviceProvider.CreateScope();
+                            var orderManager = autoScope.ServiceProvider.GetRequiredService<OrderManagementService>();
+                            await orderManager.AutoSquareOffAllPositionsAsync("Daily_310PM_AutoSquareOff");
+                            _lastSquareOffDate = todayIst;
+                        }
+                    }
+
+                    // 2. Daily 3:40 PM IST Auto-Stop Engine
                     if (nowIst >= autoStopCutoff || nowIst < marketOpen)
                     {
                         if (_fyersApi.IsEngineRunning)
                         {
-                            _logger.LogInformation("Daily 3:40 PM IST cutoff reached. Automatically stopping Strategy Engine and disconnecting broker session.");
+                            _logger.LogInformation("Daily 3:40 PM IST market cutoff reached. Automatically stopping Strategy Engine and disconnecting broker session.");
                             _fyersApi.Disconnect();
                         }
 
-                        // Sleep during off-market hours
+                        // Off-market hours: sleep with 10s delay to eliminate CPU and hosting costs
+                        await Task.Delay(10000, stoppingToken);
+                        continue;
+                    }
+
+                    // 3. If Engine is Stopped (manually or by auto-stop), pause execution and make NO outbound calls
+                    if (!_fyersApi.IsEngineRunning)
+                    {
                         await Task.Delay(5000, stoppingToken);
                         continue;
                     }
@@ -81,18 +107,11 @@ namespace StoicTrade.Api.Services.Strategies
                     using var scope = _serviceProvider.CreateScope();
                     var dbContext = scope.ServiceProvider.GetRequiredService<AppDbContext>();
 
-                    // 1. Fetch enabled strategies from DB
+                    // 4. Fetch enabled strategies from DB
                     var activeConfigs = dbContext.StrategyConfigs.Where(s => s.IsEnabled).ToList();
 
-                    // 2. Fetch market data based on TradeMode
+                    // 5. Fetch market data based on TradeMode
                     var globalSettings = dbContext.GlobalSettings.FirstOrDefault();
-                    if (globalSettings != null && globalSettings.TradeMode == "Live" && !_fyersApi.IsEngineRunning)
-                    {
-                        // Live trade mode is configured but engine is stopped / not authenticated
-                        await Task.Delay(3000, stoppingToken);
-                        continue;
-                    }
-
                     string marketDataJson = "{\"symbol\": \"NIFTY\", \"price\": 22000}"; // Default fallback
 
                     if (globalSettings != null && globalSettings.TradeMode == "Paper")
