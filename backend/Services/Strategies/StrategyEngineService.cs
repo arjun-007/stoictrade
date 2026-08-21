@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
@@ -11,13 +12,36 @@ using StoicTrade.Api.Models;
 
 namespace StoicTrade.Api.Services.Strategies
 {
+    /// <summary>
+    /// Holds a single generated signal entry for the live signal log on the Strategy Analysis page.
+    /// </summary>
+    public class SignalLogEntry
+    {
+        public string Id { get; set; } = Guid.NewGuid().ToString();
+        public string StrategyName { get; set; } = string.Empty;
+        public string Action { get; set; } = string.Empty;   // BUY | SELL
+        public string Instrument { get; set; } = string.Empty;
+        public decimal Price { get; set; }
+        public int Quantity { get; set; }
+        /// <summary>AutoExecuted | AwaitingApproval | SignalOnly | Blocked</summary>
+        public string Status { get; set; } = string.Empty;
+        public DateTime GeneratedAt { get; set; } = DateTime.UtcNow;
+    }
+
     public class StrategyEngineService : BackgroundService
     {
         private readonly ILogger<StrategyEngineService> _logger;
         private readonly IServiceProvider _serviceProvider;
         private readonly IEnumerable<IStrategy> _strategies;
 
-        public StrategyEngineService(ILogger<StrategyEngineService> logger, IServiceProvider serviceProvider, IEnumerable<IStrategy> strategies)
+        // Static log of the last 100 signals — accessible via EngineController
+        public static readonly ConcurrentQueue<SignalLogEntry> RecentSignals = new();
+        private const int MaxLogSize = 100;
+
+        public StrategyEngineService(
+            ILogger<StrategyEngineService> logger,
+            IServiceProvider serviceProvider,
+            IEnumerable<IStrategy> strategies)
         {
             _logger = logger;
             _serviceProvider = serviceProvider;
@@ -68,6 +92,24 @@ namespace StoicTrade.Api.Services.Strategies
                             if (signal != null)
                             {
                                 tickSignals.Add(signal);
+                                // Determine log status based on operating mode
+                                string logStatus = config.OperatingMode switch
+                                {
+                                    "Automatic" => "AutoExecuted",
+                                    "ApprovalRequired" => "AwaitingApproval",
+                                    "SignalOnly" => "SignalOnly",
+                                    _ => "SignalOnly"
+                                };
+                                AddToSignalLog(new SignalLogEntry
+                                {
+                                    StrategyName = signal.StrategyName,
+                                    Action = signal.Action,
+                                    Instrument = signal.Instrument,
+                                    Price = signal.Price,
+                                    Quantity = signal.Quantity,
+                                    Status = logStatus,
+                                    GeneratedAt = DateTime.UtcNow
+                                });
                             }
                         }
                     }
@@ -99,6 +141,16 @@ namespace StoicTrade.Api.Services.Strategies
             }
 
             _logger.LogInformation("Strategy Engine is stopping.");
+        }
+
+        private static void AddToSignalLog(SignalLogEntry entry)
+        {
+            RecentSignals.Enqueue(entry);
+            // Trim to last MaxLogSize entries
+            while (RecentSignals.Count > MaxLogSize)
+            {
+                RecentSignals.TryDequeue(out _);
+            }
         }
     }
 }

@@ -49,7 +49,9 @@ export default function PositionsPage() {
                 qty: qty,
                 buyPrice: p.buyAvg ?? 0,
                 sellPrice: p.sellAvg ?? 0,
-                ltp: p.ltp ?? p.buyAvg ?? 0,
+                ltp: p.ltp ?? p.unrealized_profit !== undefined
+                  ? (p.ltp ?? p.buyAvg ?? 0)
+                  : (p.buyAvg ?? 0),
                 type: (p.netQty ?? 0) >= 0 ? "LONG" : "SHORT",
                 status: qty === 0 ? "EXITED" : "ACTIVE",
                 category: "DAY"

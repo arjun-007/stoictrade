@@ -42,8 +42,10 @@ namespace StoicTrade.Api.Controllers
 
             foreach (var pos in paperPositions)
             {
-                // Default to last trade price if market data not available for PnL
-                decimal ltp = _marketDataCache.GetSpotData(pos.Symbol)?.Price ?? (pos.NetQty > 0 ? pos.BuyAvg : pos.SellAvg);
+                // Priority: individual option price cache → spot data → last trade avg
+                decimal ltp = _marketDataCache.GetOptionPrice(pos.Symbol)
+                    ?? _marketDataCache.GetSpotData(pos.Symbol)?.Price
+                    ?? (pos.NetQty > 0 ? pos.BuyAvg : pos.SellAvg);
                 decimal unrealized = 0;
                 
                 if (pos.NetQty > 0) unrealized = (ltp - pos.BuyAvg) * pos.NetQty;
@@ -54,6 +56,7 @@ namespace StoicTrade.Api.Controllers
                     netQty = pos.NetQty,
                     buyAvg = pos.BuyAvg,
                     sellAvg = pos.SellAvg,
+                    ltp = ltp,
                     realized_profit = pos.RealizedProfit,
                     unrealized_profit = unrealized,
                     pl = pos.RealizedProfit + unrealized,

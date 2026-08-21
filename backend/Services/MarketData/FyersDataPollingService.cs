@@ -151,6 +151,10 @@ namespace StoicTrade.Api.Services.MarketData
                         // Map Fyers JSON back to NSE format for backward compatibility with Watchlist UI
                         var mappedJson = MapFyersToNseFormat(optDoc, niftySpotPrice);
                         _cache.UpdateOptionChainData("NIFTY", mappedJson);
+                        
+                        // Also cache each individual option contract LTP so portfolio positions can get live LTP
+                        CacheIndividualOptionPrices(optDoc);
+                        
                         _logger.LogDebug($"Fyers Poller: Updated Option Chain around {atmStrike}");
                     }
                 }
@@ -245,6 +249,33 @@ namespace StoicTrade.Api.Services.MarketData
             };
 
             return JsonSerializer.Serialize(result);
+        }
+
+        private void CacheIndividualOptionPrices(JsonDocument fyersDoc)
+        {
+            try
+            {
+                var dataArray = fyersDoc.RootElement.GetProperty("d");
+                foreach (var item in dataArray.EnumerateArray())
+                {
+                    if (item.TryGetProperty("s", out var sProp) && sProp.GetString() == "error") continue;
+                    var v = item.GetProperty("v");
+                    if (v.ValueKind == JsonValueKind.Null) continue;
+                    if (!v.TryGetProperty("short_name", out var snProp)) continue;
+                    var symbol = snProp.GetString();
+                    if (string.IsNullOrEmpty(symbol) || symbol == "NIFTY50-INDEX") continue;
+
+                    // Canonical key: strip NSE: prefix → e.g. "NIFTY26AUG23850CE"
+                    string key = symbol.StartsWith("NSE:") ? symbol.Substring(4) : symbol;
+                    if (!v.TryGetProperty("lp", out var lpProp)) continue;
+                    decimal lp = lpProp.GetDecimal();
+                    _cache.UpdateOptionPrice(key, lp);
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "CacheIndividualOptionPrices: Failed to parse option prices.");
+            }
         }
 
         private List<string> GetUpcomingExpiries()
