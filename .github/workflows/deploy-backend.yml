@@ -1,0 +1,48 @@
+name: Deploy Backend to Production
+
+on:
+  push:
+    branches: [ development ]
+    paths:
+      - 'backend/**'
+      - 'docker-compose.prod.yml'
+      - 'Caddyfile'
+      - '.github/workflows/deploy-backend.yml'
+
+jobs:
+  deploy:
+    name: SSH Deploy
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Deploy to server via SSH
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.SERVER_HOST }}
+          username: ${{ secrets.SERVER_USER }}
+          key: ${{ secrets.SERVER_SSH_KEY }}
+          port: ${{ secrets.SERVER_PORT || 22 }}
+          script: |
+            set -euo pipefail
+
+            echo ">>> Navigating to app directory..."
+            cd ${{ secrets.APP_DIR }}
+
+            echo ">>> Pulling latest from development..."
+            git fetch origin
+            git checkout development
+            git pull origin development
+
+            echo ">>> Rebuilding and restarting containers..."
+            docker compose -f docker-compose.prod.yml up -d --build --remove-orphans
+
+            echo ">>> Pruning dangling images..."
+            docker image prune -f
+
+            echo ">>> Container status:"
+            docker compose -f docker-compose.prod.yml ps
+
+            echo "✅ Deploy complete!"
