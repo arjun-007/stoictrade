@@ -39,6 +39,14 @@ const MONTH_NAMES = ["JAN","FEB","MAR","APR","MAY","JUN","JUL","AUG","SEP","OCT"
  *   weekly format: yy + monthChar + dd  e.g. "2682521" → yy=26, month=8(AUG), dd=21
  *   monthly format: yyMMM.toUpper()    e.g. "26AUG"
  */
+function getLastThursdayOfMonth(year: number, month: number): number {
+  const lastDay = new Date(year, month, 0).getDate();
+  const date = new Date(year, month - 1, lastDay);
+  const dayOfWeek = date.getDay(); // 0 = Sun, 4 = Thu
+  const diff = (dayOfWeek - 4 + 7) % 7;
+  return lastDay - diff;
+}
+
 function parseExpiry(expiryStr: string): { day: string; month: string; year: string } {
   // Strip any accidental 'NIFTY' prefix that slips through from old cached data
   let s = expiryStr;
@@ -46,16 +54,20 @@ function parseExpiry(expiryStr: string): { day: string; month: string; year: str
 
   // Monthly format: 5 chars like "26AUG" (yy + MMM)
   if (/^\d{2}[A-Z]{3}$/.test(s)) {
-    const year = s.substring(0, 2);
+    const yearShort = s.substring(0, 2);
     const mon = s.substring(2, 5);
-    return { day: "", month: mon, year };
+    const monthIdx = MONTH_NAMES.indexOf(mon);
+    const fullYear = 2000 + parseInt(yearShort, 10);
+    const lastThurs = monthIdx >= 0 ? getLastThursdayOfMonth(fullYear, monthIdx + 1) : 0;
+    const day = lastThurs > 0 ? String(lastThurs).padStart(2, "0") : "";
+    return { day, month: mon, year: yearShort };
   }
   // Weekly format: 5 chars like "26821" (yy + monthChar + dd)
   if (/^\d{2}[0-9ONDond]\d{2}$/.test(s)) {
     const year = s.substring(0, 2);
     const mChar = s.substring(2, 3).toUpperCase();
     const day = s.substring(3, 5);
-    let monthIdx = parseInt(mChar);
+    let monthIdx = parseInt(mChar, 10);
     if (mChar === "O") monthIdx = 10;
     else if (mChar === "N") monthIdx = 11;
     else if (mChar === "D") monthIdx = 12;

@@ -113,10 +113,10 @@ namespace StoicTrade.Api.Services.MarketData
                     int atmStrike = (int)Math.Round(niftySpotPrice / 50.0m) * 50;
                     var expiries = GetUpcomingExpiries();
 
-                    // Batch: 5 strikes each side (11 strikes × 2 = 22 sym) per expiry → 2 expiries per batch (44 sym)
-                    // Safely under Fyers 50-symbol limit.
-                    const int StrikesEachSide = 5;
-                    const int ExpiryBatchSize = 2;
+                    // Batch: 8 strikes each side (17 strikes × 2 = 34 sym) per expiry → 1 expiry per batch (34 sym)
+                    // Safely under Fyers 50-symbol limit and ensures one unlisted expiry does not fail others.
+                    const int StrikesEachSide = 8;
+                    const int ExpiryBatchSize = 1;
                     var allOptionDocs = new List<JsonDocument>();
 
                     for (int batchStart = 0; batchStart < expiries.Count; batchStart += ExpiryBatchSize)
@@ -148,7 +148,7 @@ namespace StoicTrade.Api.Services.MarketData
 
                         // Small delay between batches to avoid rate limiting
                         if (batchStart + ExpiryBatchSize < expiries.Count)
-                            await Task.Delay(200, stoppingToken);
+                            await Task.Delay(100, stoppingToken);
                     }
 
                     if (allOptionDocs.Count > 0)
