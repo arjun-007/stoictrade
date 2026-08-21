@@ -88,20 +88,22 @@ namespace StoicTrade.Api.Services.MarketData
                             string rawName = !string.IsNullOrEmpty(queryName) ? queryName : (!string.IsNullOrEmpty(sym) ? sym : shortName);
                             var volume = v.TryGetProperty("volume", out var vol) ? vol.GetDecimal() : 0m;
                             
-                            // Normalize symbol name (e.g. NIFTY50-INDEX -> NIFTY)
-                            string cacheKey = rawName.Replace("NSE:", "").Replace("50-INDEX", "").Replace("50", "").Trim();
-                            _cache.UpdateSpotData(cacheKey, lp, DateTime.UtcNow);
-                            _cache.UpdateSpotData("NIFTY", lp, DateTime.UtcNow);
-
                             if (rawName.Contains("NIFTY", StringComparison.OrdinalIgnoreCase))
                             {
                                 niftySpotPrice = lp;
+                                _cache.UpdateSpotData("NIFTY", lp, DateTime.UtcNow);
+                                _cache.UpdateSpotData("NIFTY50-INDEX", lp, DateTime.UtcNow);
                                 if (!_isAggregatorInitialized)
                                 {
                                     await _aggregator.InitializeSymbolAsync("NSE:NIFTY50-INDEX", new[] { 1, 5, 15 }, niftySpotPrice);
                                     _isAggregatorInitialized = true;
                                 }
                                 _aggregator.UpdateTick("NSE:NIFTY50-INDEX", niftySpotPrice, volume);
+                            }
+                            else
+                            {
+                                string cleanKey = rawName.Replace("NSE:", "").Replace("-EQ", "").Trim();
+                                _cache.UpdateSpotData(cleanKey, lp, DateTime.UtcNow);
                             }
                         }
                     }

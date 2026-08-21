@@ -51,10 +51,12 @@ namespace StoicTrade.Api.Controllers
 
         private (decimal totalPnL, int activeCount, List<object> mockNetPositions) GetMockPaperData()
         {
-            var rawNifty = _dbContext.PaperPositions.Where(p => p.Symbol == "NIFTY").ToList();
-            if (rawNifty.Any())
+            var invalidPositions = _dbContext.PaperPositions
+                .Where(p => p.Symbol == "NIFTY" || (p.Symbol.StartsWith("NIFTY") && (p.Symbol.Contains("1300") || p.Symbol.Contains("1250") || p.Symbol.Contains("1350"))))
+                .ToList();
+            if (invalidPositions.Any())
             {
-                _dbContext.PaperPositions.RemoveRange(rawNifty);
+                _dbContext.PaperPositions.RemoveRange(invalidPositions);
                 try { _dbContext.SaveChanges(); } catch {}
             }
 
