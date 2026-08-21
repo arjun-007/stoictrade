@@ -83,6 +83,7 @@ namespace StoicTrade.Api.Services.Strategies
 
                     // 3. Evaluate each active strategy
                     var tickSignals = new List<Signal>();
+                    var optionEngine = scope.ServiceProvider.GetRequiredService<OptionSelectionEngine>();
                     foreach (var config in activeConfigs)
                     {
                         var strategy = _strategies.FirstOrDefault(s => s.Name == config.StrategyName);
@@ -91,6 +92,19 @@ namespace StoicTrade.Api.Services.Strategies
                             var signal = await strategy.ExecuteAsync(config, marketDataJson);
                             if (signal != null)
                             {
+                                // If signal is for NIFTY underlying, select the optimal ATM option contract
+                                if (signal.Instrument == "NIFTY")
+                                {
+                                    string bias = signal.Action == "BUY" ? "BULLISH" : "BEARISH";
+                                    var contract = optionEngine.GetOptimalContract("NIFTY", bias, 0);
+                                    if (!string.IsNullOrEmpty(contract))
+                                    {
+                                        string optSymbol = contract.Replace("NSE:", "");
+                                        signal.Instrument = optSymbol;
+                                        signal.Price = optionEngine.ResolveOptionLtp(optSymbol) ?? signal.Price;
+                                    }
+                                }
+
                                 tickSignals.Add(signal);
                                 // Determine log status based on operating mode
                                 string logStatus = config.OperatingMode switch

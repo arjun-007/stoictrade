@@ -68,12 +68,12 @@ namespace StoicTrade.Api.Services
                 // Depending on strictness, we might return false here. For now, continue.
             }
 
-            // 4. Instrument Rule: Only allow NIFTY Index Options and Equity Stocks (EQ)
+            // 4. Instrument Rule: Only allow NIFTY Index / Options and Equity Stocks (EQ)
             var instrument = signal.Instrument.ToUpperInvariant();
-            bool isNiftyOption = instrument.StartsWith("NIFTY") && (instrument.Contains("CE") || instrument.Contains("PE"));
+            bool isNifty = instrument == "NIFTY" || (instrument.StartsWith("NIFTY") && (instrument.Contains("CE") || instrument.Contains("PE")));
             bool isEquity = instrument.EndsWith("-EQ");
 
-            if (!isNiftyOption && !isEquity)
+            if (!isNifty && !isEquity)
             {
                 _logger.LogWarning("RiskEngine: Blocked. Instrument {Instrument} not allowed.", instrument);
                 return false;

@@ -20,6 +20,57 @@ interface Position {
   category: PositionCategory;
 }
 
+const MONTH_NAMES = ["JAN","FEB","MAR","APR","MAY","JUN","JUL","AUG","SEP","OCT","NOV","DEC"];
+
+function getLastThursdayOfMonth(year: number, month: number): number {
+  const lastDay = new Date(year, month, 0).getDate();
+  const date = new Date(year, month - 1, lastDay);
+  const dayOfWeek = date.getDay();
+  const diff = (dayOfWeek - 4 + 7) % 7;
+  return lastDay - diff;
+}
+
+export function formatInstrumentName(symbol: string): string {
+  if (!symbol || symbol === "-") return "-";
+  let s = symbol.trim();
+  if (s.startsWith("NSE:")) s = s.substring(4);
+  if (s.startsWith("NIFTYNIFTY")) s = s.substring(5);
+
+  if (!s.startsWith("NIFTY")) return s;
+  const rest = s.substring(5); // after "NIFTY"
+  
+  const type = rest.endsWith("CE") ? "CE" : rest.endsWith("PE") ? "PE" : "";
+  if (!type) return s;
+
+  const noType = rest.substring(0, rest.length - 2);
+
+  // Monthly format: e.g. "26AUG24000"
+  const monthlyMatch = noType.match(/^(\d{2})([A-Za-z]{3})(\d+)$/);
+  if (monthlyMatch) {
+    const [, yy, mon, strike] = monthlyMatch;
+    const monthIdx = MONTH_NAMES.indexOf(mon.toUpperCase());
+    const fullYear = 2000 + parseInt(yy, 10);
+    const lastThurs = monthIdx >= 0 ? getLastThursdayOfMonth(fullYear, monthIdx + 1) : 0;
+    const dayStr = lastThurs > 0 ? `${String(lastThurs).padStart(2, "0")} ` : "";
+    return `NIFTY ${dayStr}${mon.toUpperCase()} ${yy} ${strike} ${type}`;
+  }
+
+  // Weekly format: e.g. "2690824200" or "2682524200"
+  const weeklyMatch = noType.match(/^(\d{2})([0-9ONDond])(\d{2})(\d+)$/);
+  if (weeklyMatch) {
+    const [, yy, mChar, dd, strike] = weeklyMatch;
+    const mUpper = mChar.toUpperCase();
+    let monthIdx = parseInt(mUpper, 10);
+    if (mUpper === "O") monthIdx = 10;
+    else if (mUpper === "N") monthIdx = 11;
+    else if (mUpper === "D") monthIdx = 12;
+    const mon = MONTH_NAMES[(monthIdx - 1) % 12] || mUpper;
+    return `NIFTY ${dd} ${mon} ${yy} ${strike} ${type}`;
+  }
+
+  return s;
+}
+
 export default function PositionsPage() {
   const [activeTab, setActiveTab] = useState<PositionCategory>("DAY");
   
@@ -27,14 +78,21 @@ export default function PositionsPage() {
   const [filterType, setFilterType] = useState<PositionType | "ALL">("ALL");
 
   const [positionsData, setPositionsData] = useState<Position[]>([]);
+  const [niftySpot, setNiftySpot] = useState<number | null>(null);
 
   useEffect(() => {
     const fetchPositions = async () => {
       try {
-        const [posRes, holdRes] = await Promise.all([
+        const [posRes, holdRes, spotRes] = await Promise.all([
           fetchWithAuth("/api/portfolio/positions"),
-          fetchWithAuth("/api/portfolio/holdings")
+          fetchWithAuth("/api/portfolio/holdings"),
+          fetchWithAuth("/api/marketdata/spot?symbol=NIFTY")
         ]);
+
+        if (spotRes.ok) {
+          const spotData = await spotRes.json();
+          setNiftySpot(spotData.price ?? spotData.lastPrice ?? null);
+        }
 
         let mapped: Position[] = [];
 
@@ -121,6 +179,20 @@ export default function PositionsPage() {
         </div>
         
         <div className="flex items-center gap-4">
+          {/* NIFTY Spot Card */}
+          <div className="hidden sm:block text-right pr-4 border-r border-slate-200 dark:border-slate-800">
+            <div className="flex items-center justify-end gap-1.5 text-xs text-slate-500 font-medium">
+              <span className="font-semibold uppercase tracking-wider text-[11px]">NIFTY SPOT</span>
+              <span className="flex items-center gap-1 text-green-500 text-[11px]">
+                <span className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse"></span>
+                Live
+              </span>
+            </div>
+            <p className="text-xl font-bold text-slate-900 dark:text-white">
+              {niftySpot !== null ? `₹ ${niftySpot.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : "—"}
+            </p>
+          </div>
+
           <div className="text-right">
             <p className="text-sm font-semibold text-slate-500 uppercase tracking-wider">{activeTab} P&L</p>
             <p className={`text-2xl font-bold flex items-center gap-2 ${totalPnL >= 0 ? 'text-green-500' : 'text-danger'}`}>
@@ -205,7 +277,10 @@ export default function PositionsPage() {
                   
                   return (
                     <tr key={pos.id} className="hover:bg-slate-50 dark:hover:bg-slate-800/20 transition-colors">
-                      <td className="p-4 font-bold text-slate-900 dark:text-white">{pos.symbol}</td>
+                      <td className="p-4">
+                        <div className="font-bold text-slate-900 dark:text-white">{formatInstrumentName(pos.symbol)}</div>
+                        <div className="text-xs text-slate-400 font-mono font-normal">{pos.symbol}</div>
+                      </td>
                       <td className="p-4">
                         <span className={`px-2.5 py-1 text-xs font-bold rounded-md ${
                           pos.type === "LONG" 

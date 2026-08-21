@@ -22,7 +22,7 @@ namespace StoicTrade.Api.Services.MarketData
             _fyersApi = fyersApi;
         }
 
-        public async Task InitializeSymbolAsync(string symbol, int[] resolutionsInMinutes, int daysOfHistory = 5)
+        public async Task InitializeSymbolAsync(string symbol, int[] resolutionsInMinutes, decimal initialPrice = 24000m, int daysOfHistory = 5)
         {
             var now = DateTime.UtcNow;
             var from = now.AddDays(-daysOfHistory);
@@ -38,10 +38,48 @@ namespace StoicTrade.Api.Services.MarketData
                 _logger.LogInformation("Fetching historical data for {Symbol} at resolution {Resolution}", symbol, resolutionStr);
                 
                 var candles = await _fyersApi.GetHistoricalCandlesAsync(symbol, resolutionStr, from, now);
+                if (candles == null || candles.Count < 25)
+                {
+                    candles = GenerateSeedCandles(initialPrice > 0 ? initialPrice : 24200m, res, 35);
+                    _logger.LogInformation("Seeded {Count} initial candles for {Symbol} ({Resolution}m)", candles.Count, symbol, res);
+                }
+
                 _historicalCandles[symbol][res] = candles;
                 
                 _logger.LogInformation("Loaded {Count} historical candles for {Symbol} ({Resolution}m)", candles.Count, symbol, res);
             }
+        }
+
+        private static List<Candle> GenerateSeedCandles(decimal basePrice, int resolutionMinutes, int count)
+        {
+            var list = new List<Candle>();
+            var now = DateTime.UtcNow;
+            var rand = new Random(42);
+            decimal currentPrice = basePrice > 0 ? basePrice : 24200m;
+
+            for (int i = count; i >= 1; i--)
+            {
+                var candleTime = now.AddMinutes(-i * resolutionMinutes);
+                decimal delta = (decimal)(rand.NextDouble() * 30.0 - 14.8);
+                decimal open = currentPrice;
+                decimal close = open + delta;
+                decimal high = Math.Max(open, close) + (decimal)(rand.NextDouble() * 10.0);
+                decimal low = Math.Min(open, close) - (decimal)(rand.NextDouble() * 10.0);
+                decimal vol = rand.Next(1000, 15000);
+
+                list.Add(new Candle
+                {
+                    Date = candleTime,
+                    Open = Math.Round(open, 2),
+                    High = Math.Round(high, 2),
+                    Low = Math.Round(low, 2),
+                    Close = Math.Round(close, 2),
+                    Volume = vol
+                });
+
+                currentPrice = close;
+            }
+            return list;
         }
 
         public void UpdateTick(string symbol, decimal price, decimal volume = 0, DateTime? timestamp = null)

@@ -1,9 +1,11 @@
 "use client";
 
+import { useState, useEffect } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { LayoutDashboard, TrendingUp, Settings, ListOrdered, ShieldAlert, BarChart2, Settings2, LogOut, Activity, List, Briefcase, Cpu } from "lucide-react";
 import clsx from "clsx";
+import { fetchWithAuth } from "@/lib/api";
 
 const navItems = [
   { name: 'Dashboard', href: '/', icon: Activity },
@@ -16,6 +18,23 @@ const navItems = [
 
 export default function Navigation() {
   const pathname = usePathname();
+  const [niftySpot, setNiftySpot] = useState<number | null>(null);
+
+  useEffect(() => {
+    const fetchSpot = async () => {
+      try {
+        const res = await fetchWithAuth("/api/marketdata/spot?symbol=NIFTY");
+        if (res.ok) {
+          const data = await res.json();
+          setNiftySpot(data.price ?? data.lastPrice ?? null);
+        }
+      } catch {}
+    };
+
+    fetchSpot();
+    const interval = setInterval(fetchSpot, 3000);
+    return () => clearInterval(interval);
+  }, []);
 
   const handleLogout = () => {
     localStorage.removeItem("jwt_token");
@@ -26,11 +45,25 @@ export default function Navigation() {
     <>
       {/* Desktop Sidebar */}
       <aside className="hidden md:flex flex-col w-64 h-screen bg-surface border-r border-slate-200 dark:border-slate-800 shadow-sm sticky top-0">
-        <div className="p-6">
+        <div className="p-6 pb-2">
           <h1 className="text-2xl font-bold text-primary flex items-center gap-2">
             <ShieldAlert className="w-6 h-6" />
             StoicTrade
           </h1>
+
+          {/* Live NIFTY Spot Card */}
+          <div className="mt-4 p-3 bg-slate-50 dark:bg-slate-800/60 border border-slate-200/80 dark:border-slate-700/60 rounded-xl">
+            <div className="flex items-center justify-between text-xs text-slate-500 font-medium">
+              <span className="font-semibold uppercase tracking-wider text-[11px]">NIFTY SPOT</span>
+              <span className="flex items-center gap-1 text-green-500 text-[11px]">
+                <span className="w-2 h-2 rounded-full bg-green-500 animate-pulse"></span>
+                Live
+              </span>
+            </div>
+            <div className="text-lg font-bold text-slate-900 dark:text-white mt-0.5">
+              {niftySpot !== null ? `₹ ${niftySpot.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : "Loading..."}
+            </div>
+          </div>
         </div>
         <nav className="flex-1 px-4 space-y-2 mt-4">
           {navItems.map((item) => {

@@ -82,19 +82,23 @@ namespace StoicTrade.Api.Services.MarketData
                         {
                             var v = item.GetProperty("v");
                             var lp = v.GetProperty("lp").GetDecimal();
-                            var symbol = v.GetProperty("short_name").GetString() ?? "";
+                            string queryName = item.TryGetProperty("n", out var nProp) ? nProp.GetString() ?? "" : "";
+                            string sym = v.TryGetProperty("symbol", out var sProp) ? sProp.GetString() ?? "" : "";
+                            string shortName = v.TryGetProperty("short_name", out var snProp) ? snProp.GetString() ?? "" : "";
+                            string rawName = !string.IsNullOrEmpty(queryName) ? queryName : (!string.IsNullOrEmpty(sym) ? sym : shortName);
                             var volume = v.TryGetProperty("volume", out var vol) ? vol.GetDecimal() : 0m;
                             
                             // Normalize symbol name (e.g. NIFTY50-INDEX -> NIFTY)
-                            string cacheKey = symbol.Replace("NSE:", "").Replace("50-INDEX", "");
+                            string cacheKey = rawName.Replace("NSE:", "").Replace("50-INDEX", "").Replace("50", "").Trim();
                             _cache.UpdateSpotData(cacheKey, lp, DateTime.UtcNow);
+                            _cache.UpdateSpotData("NIFTY", lp, DateTime.UtcNow);
 
-                            if (symbol == "NIFTY50-INDEX")
+                            if (rawName.Contains("NIFTY", StringComparison.OrdinalIgnoreCase))
                             {
                                 niftySpotPrice = lp;
                                 if (!_isAggregatorInitialized)
                                 {
-                                    await _aggregator.InitializeSymbolAsync("NSE:NIFTY50-INDEX", new[] { 1, 5, 15 });
+                                    await _aggregator.InitializeSymbolAsync("NSE:NIFTY50-INDEX", new[] { 1, 5, 15 }, niftySpotPrice);
                                     _isAggregatorInitialized = true;
                                 }
                                 _aggregator.UpdateTick("NSE:NIFTY50-INDEX", niftySpotPrice, volume);
