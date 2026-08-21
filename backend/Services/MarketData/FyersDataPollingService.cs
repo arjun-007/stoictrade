@@ -357,9 +357,19 @@ namespace StoicTrade.Api.Services.MarketData
             var ist = TimeZoneHelper.GetIstTimeZone();
             DateTime today = TimeZoneInfo.ConvertTimeFromUtc(DateTime.UtcNow, ist).Date;
 
-            // ── Weekly expiries: next 4 Thursdays ──────────────────────────────
-            int daysUntilThursday = ((int)DayOfWeek.Thursday - (int)today.DayOfWeek + 7) % 7;
+            // ── 1. Weekly expiries for Tuesdays (next 4 Tuesdays) ─────────────
+            int daysUntilTuesday = ((int)DayOfWeek.Tuesday - (int)today.DayOfWeek + 7) % 7;
+            for (int i = 0; i < 4; i++)
+            {
+                DateTime tues = today.AddDays(daysUntilTuesday + (i * 7));
+                int month = tues.Month;
+                string monthChar = month <= 9 ? month.ToString()
+                    : month == 10 ? "O" : month == 11 ? "N" : "D";
+                expiries.Add($"{tues:yy}{monthChar}{tues:dd}");
+            }
 
+            // ── 2. Weekly expiries for Thursdays (next 4 Thursdays) ───────────
+            int daysUntilThursday = ((int)DayOfWeek.Thursday - (int)today.DayOfWeek + 7) % 7;
             for (int i = 0; i < 4; i++)
             {
                 DateTime thurs = today.AddDays(daysUntilThursday + (i * 7));
@@ -380,13 +390,12 @@ namespace StoicTrade.Api.Services.MarketData
                 }
             }
 
-            // ── Monthly expiries: last Thursday of current + next 5 months ─────
+            // ── 3. Monthly expiries: last Thursday of current + next 5 months ──
             for (int m = 0; m < 6; m++)
             {
                 var monthStart = new DateTime(today.Year, today.Month, 1).AddMonths(m);
                 DateTime lastThurs = GetLastThursdayOfMonth(monthStart);
 
-                // Skip if it's the same as a weekly expiry already added
                 string monthlyFmt = lastThurs.ToString("yyMMM").ToUpper();
                 expiries.Add(monthlyFmt);
             }
