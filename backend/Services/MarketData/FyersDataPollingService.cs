@@ -113,9 +113,9 @@ namespace StoicTrade.Api.Services.MarketData
                     int atmStrike = (int)Math.Round(niftySpotPrice / 50.0m) * 50;
                     var expiries = GetUpcomingExpiries();
 
-                    // Batch: 4 strikes each side (9 strikes × 2 = 18 symbols) per expiry → 2 expiries per batch (36 sym)
-                    // This keeps each request comfortably under Fyers 50-symbol limit.
-                    const int StrikesEachSide = 4;
+                    // Batch: 5 strikes each side (11 strikes × 2 = 22 sym) per expiry → 2 expiries per batch (44 sym)
+                    // Safely under Fyers 50-symbol limit.
+                    const int StrikesEachSide = 5;
                     const int ExpiryBatchSize = 2;
                     var allOptionDocs = new List<JsonDocument>();
 
@@ -185,7 +185,7 @@ namespace StoicTrade.Api.Services.MarketData
             actualExpiry = ""; strike = 0; type = "";
             if (string.IsNullOrEmpty(raw) || raw == "NIFTY50-INDEX") return false;
 
-            // Strip known prefixes so we always work with "26AUG24250CE" or "2682124250CE"
+            // Strip known prefixes so we always work with e.g. "26AUG24250CE" or "2682824250CE"
             string s = raw;
             if (s.StartsWith("NSE:NIFTY")) s = s.Substring(9);
             else if (s.StartsWith("NSE:"))    s = s.Substring(4);
@@ -207,6 +207,19 @@ namespace StoicTrade.Api.Services.MarketData
             }
             if (strikeLen == 0) return false;
 
+            if (strikeLen == noSuffix.Length)
+            {
+                // ── All-digits case: weekly expiry format e.g. "2682824250" ──────────────
+                // Fyers weekly expiry is ALWAYS 5 chars: yy + monthChar(1) + dd(2)
+                // NIFTY strike is always the remaining digits (typically 5 but can be 4-6).
+                // So: first 5 chars = expiry, rest = strike.
+                if (noSuffix.Length < 6) return false; // need at least 5 (expiry) + 1 (strike)
+                actualExpiry = noSuffix.Substring(0, 5);
+                if (!int.TryParse(noSuffix.Substring(5), out strike)) return false;
+                return strike > 0;
+            }
+
+            // ── Mixed case: monthly expiry like "26AUG24250" ─────────────────────────
             if (!int.TryParse(noSuffix.Substring(noSuffix.Length - strikeLen), out strike)) return false;
             actualExpiry = noSuffix.Substring(0, noSuffix.Length - strikeLen);
             return true;

@@ -216,20 +216,20 @@ export default function WatchlistPage() {
   // If search is empty and bar is focused, show ATM ± 3 strikes as suggestions
   const atmStrike = niftySpot ? Math.round(niftySpot / 50) * 50 : 0;
 
-  const searchResults: ParsedInstrument[] = (() => {
+    const searchResults: ParsedInstrument[] = (() => {
     if (!searchFocused) return [];
     if (query === "") {
-      // Show ATM ± 3 suggestions if data loaded
+      // Show ATM ± 6 suggestions if data loaded
       if (!atmStrike || liveInstruments.length === 0) return [];
       return liveInstruments
-        .filter(i => Math.abs(i.strike - atmStrike) <= 150 && !alreadyAdded.has(i.symbol))
+        .filter(i => Math.abs(i.strike - atmStrike) <= 300 && !alreadyAdded.has(i.symbol))
         .sort((a, b) => {
           const da = Math.abs(a.strike - atmStrike);
           const db = Math.abs(b.strike - atmStrike);
           if (da !== db) return da - db;
           return a.optionType.localeCompare(b.optionType);
         })
-        .slice(0, 12);
+        .slice(0, 24);
     }
     // Text search: match against displayName or symbol
     return liveInstruments
@@ -237,7 +237,7 @@ export default function WatchlistPage() {
         (i.displayName.toLowerCase().includes(query) || i.symbol.toLowerCase().includes(query)) &&
         !alreadyAdded.has(i.symbol)
       )
-      .slice(0, 20);
+      .slice(0, 50);
   })();
 
   // ── Actions ────────────────────────────────────────────────────────────────
