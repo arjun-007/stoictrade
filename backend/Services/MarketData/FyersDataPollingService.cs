@@ -241,9 +241,14 @@ namespace StoicTrade.Api.Services.MarketData
                 if (item.TryGetProperty("s", out var sProp) && sProp.GetString() == "error") continue;
                 var v = item.GetProperty("v");
                 if (v.ValueKind == JsonValueKind.Null) continue;
-                if (!v.TryGetProperty("short_name", out var snProp)) continue;
 
-                if (!TryParseOptionSymbol(snProp.GetString(), out var expiry, out var strike, out var type)) continue;
+                string? symbolName = null;
+                if (item.TryGetProperty("n", out var nProp)) symbolName = nProp.GetString();
+                else if (v.TryGetProperty("symbol", out var symProp)) symbolName = symProp.GetString();
+                else if (v.TryGetProperty("short_name", out var snProp)) symbolName = snProp.GetString();
+
+                if (string.IsNullOrEmpty(symbolName)) continue;
+                if (!TryParseOptionSymbol(symbolName, out var expiry, out var strike, out var type)) continue;
                 if (!v.TryGetProperty("lp", out var lpProp) || !v.TryGetProperty("chp", out var chpProp)) continue;
 
                 decimal lp = lpProp.GetDecimal();
@@ -323,9 +328,14 @@ namespace StoicTrade.Api.Services.MarketData
                     if (item.TryGetProperty("s", out var sProp) && sProp.GetString() == "error") continue;
                     var v = item.GetProperty("v");
                     if (v.ValueKind == JsonValueKind.Null) continue;
-                    if (!v.TryGetProperty("short_name", out var snProp)) continue;
 
-                    if (!TryParseOptionSymbol(snProp.GetString(), out var expiry, out var strike, out var type)) continue;
+                    string? symbolName = null;
+                    if (item.TryGetProperty("n", out var nProp)) symbolName = nProp.GetString();
+                    else if (v.TryGetProperty("symbol", out var symProp)) symbolName = symProp.GetString();
+                    else if (v.TryGetProperty("short_name", out var snProp)) symbolName = snProp.GetString();
+
+                    if (string.IsNullOrEmpty(symbolName)) continue;
+                    if (!TryParseOptionSymbol(symbolName, out var expiry, out var strike, out var type)) continue;
                     if (!v.TryGetProperty("lp", out var lpProp)) continue;
                     decimal lp = lpProp.GetDecimal();
 
