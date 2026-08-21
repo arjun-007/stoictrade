@@ -10,6 +10,10 @@ namespace StoicTrade.Api.Models
         public int Quantity { get; set; }
         public decimal ExpectedPrice { get; set; }
         public decimal Price { get; set; }
+        public decimal StopLossPrice { get; set; }
+        public decimal TargetPrice { get; set; }
+        public decimal Atr { get; set; }
+        public decimal Rvol { get; set; }
         public string OrderType { get; set; } = "MARKET";
         public int Priority { get; set; } = 0;
         public DateTime GeneratedAt { get; set; } = DateTime.UtcNow;
