@@ -228,7 +228,13 @@ namespace StoicTrade.Api.Services.MarketData
         private static Dictionary<string, Dictionary<int, Dictionary<string, object>>> BuildStrikesMap(JsonDocument fyersDoc)
         {
             var strikesMap = new Dictionary<string, Dictionary<int, Dictionary<string, object>>>();
-            var dataArray = fyersDoc.RootElement.GetProperty("d");
+
+            // If Fyers returns a global error for the batch (e.g. invalid symbol), 'd' array won't exist.
+            if (fyersDoc.RootElement.TryGetProperty("s", out var statusProp) && statusProp.GetString() == "error")
+                return strikesMap;
+
+            if (!fyersDoc.RootElement.TryGetProperty("d", out var dataArray) || dataArray.ValueKind != JsonValueKind.Array)
+                return strikesMap;
 
             foreach (var item in dataArray.EnumerateArray())
             {
@@ -306,7 +312,12 @@ namespace StoicTrade.Api.Services.MarketData
         {
             try
             {
-                var dataArray = fyersDoc.RootElement.GetProperty("d");
+                if (fyersDoc.RootElement.TryGetProperty("s", out var statusProp) && statusProp.GetString() == "error")
+                    return;
+
+                if (!fyersDoc.RootElement.TryGetProperty("d", out var dataArray) || dataArray.ValueKind != JsonValueKind.Array)
+                    return;
+
                 foreach (var item in dataArray.EnumerateArray())
                 {
                     if (item.TryGetProperty("s", out var sProp) && sProp.GetString() == "error") continue;
@@ -343,10 +354,21 @@ namespace StoicTrade.Api.Services.MarketData
             for (int i = 0; i < 4; i++)
             {
                 DateTime thurs = today.AddDays(daysUntilThursday + (i * 7));
-                int month = thurs.Month;
-                string monthChar = month <= 9 ? month.ToString()
-                    : month == 10 ? "O" : month == 11 ? "N" : "D";
-                expiries.Add($"{thurs:yy}{monthChar}{thurs:dd}");
+                DateTime lastThurs = GetLastThursdayOfMonth(thurs);
+
+                // If this Thursday is the last Thursday of the month, NSE issues a monthly contract
+                // instead of a weekly contract. Use the monthly format (YYMMM) so Fyers doesn't reject it.
+                if (thurs.Date == lastThurs.Date)
+                {
+                    expiries.Add(thurs.ToString("yyMMM").ToUpper());
+                }
+                else
+                {
+                    int month = thurs.Month;
+                    string monthChar = month <= 9 ? month.ToString()
+                        : month == 10 ? "O" : month == 11 ? "N" : "D";
+                    expiries.Add($"{thurs:yy}{monthChar}{thurs:dd}");
+                }
             }
 
             // ── Monthly expiries: last Thursday of current + next 5 months ─────
