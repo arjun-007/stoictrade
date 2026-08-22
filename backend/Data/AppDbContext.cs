@@ -10,6 +10,7 @@ namespace StoicTrade.Api.Data
         }
 
         public DbSet<StrategyConfig> StrategyConfigs { get; set; }
+        public DbSet<StrategyGroup> StrategyGroups { get; set; }
         public DbSet<TradeLog> TradeLogs { get; set; }
         public DbSet<GlobalSettings> GlobalSettings { get; set; }
         public DbSet<PaperPosition> PaperPositions { get; set; }
@@ -48,6 +49,40 @@ namespace StoicTrade.Api.Data
                 new StrategyConfig { Id = 6, StrategyName = "MACD Zero-Line", IsEnabled = false, OperatingMode = "ApprovalRequired", PerTradeStopLossPoint = 10, PerTradeGainPoint = 20, TimeframeMinutes = 5, TrailingStopLossPoint = 5 },
                 new StrategyConfig { Id = 7, StrategyName = "Wyckoff Spring (Liquidity Sweep)", IsEnabled = false, OperatingMode = "ApprovalRequired", PerTradeStopLossPoint = 10, PerTradeGainPoint = 35, TimeframeMinutes = 5, TrailingStopLossPoint = 8 },
                 new StrategyConfig { Id = 8, StrategyName = "Fair Value Gap (FVG) / Order Block", IsEnabled = false, OperatingMode = "ApprovalRequired", PerTradeStopLossPoint = 12, PerTradeGainPoint = 30, TimeframeMinutes = 5, TrailingStopLossPoint = 6 }
+            );
+
+            // Seed initial preset strategy groups
+            modelBuilder.Entity<StrategyGroup>().HasData(
+                new StrategyGroup
+                {
+                    Id = 1,
+                    Name = "Morning Momentum Trap Squad",
+                    Description = "Combines ORB and Wyckoff Spring to capture morning breakouts and fast fakeout reclaims.",
+                    IsEnabled = false,
+                    StrategyIdsJson = "[2, 7]",
+                    ConsensusRule = "Majority",
+                    MinAgreeingStrategies = 2,
+                    OperatingMode = "ApprovalRequired",
+                    PerTradeStopLossPoint = 12.0m,
+                    PerTradeGainPoint = 35.0m,
+                    TrailingStopLossPoint = 8.0m,
+                    TimeframeMinutes = 5
+                },
+                new StrategyGroup
+                {
+                    Id = 2,
+                    Name = "Institutional Trend & Mitigation",
+                    Description = "Combines EMA Pullback, Fair Value Gap (FVG), and Supertrend for high-conviction trend continuation.",
+                    IsEnabled = false,
+                    StrategyIdsJson = "[1, 3, 8]",
+                    ConsensusRule = "Majority",
+                    MinAgreeingStrategies = 2,
+                    OperatingMode = "ApprovalRequired",
+                    PerTradeStopLossPoint = 10.0m,
+                    PerTradeGainPoint = 30.0m,
+                    TrailingStopLossPoint = 6.0m,
+                    TimeframeMinutes = 5
+                }
             );
         }
     }

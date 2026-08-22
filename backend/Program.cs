@@ -158,6 +158,63 @@ using (var scope = app.Services.CreateScope())
         dbContext.SaveChanges();
     }
     catch {}
+
+    try
+    {
+        dbContext.Database.ExecuteSqlRaw(@"
+            CREATE TABLE IF NOT EXISTS StrategyGroups (
+                Id INTEGER PRIMARY KEY AUTOINCREMENT,
+                Name TEXT NOT NULL,
+                Description TEXT,
+                IsEnabled INTEGER NOT NULL,
+                StrategyIdsJson TEXT NOT NULL,
+                ConsensusRule TEXT NOT NULL,
+                MinAgreeingStrategies INTEGER NOT NULL,
+                OperatingMode TEXT NOT NULL,
+                PerTradeStopLossPoint TEXT NOT NULL,
+                PerTradeGainPoint TEXT NOT NULL,
+                TrailingStopLossPoint TEXT NOT NULL,
+                TimeframeMinutes INTEGER NOT NULL,
+                CreatedAt TEXT NOT NULL,
+                UpdatedAt TEXT NOT NULL
+            )");
+
+        if (!dbContext.StrategyGroups.Any())
+        {
+            dbContext.StrategyGroups.AddRange(
+                new StoicTrade.Api.Models.StrategyGroup
+                {
+                    Name = "Morning Momentum Trap Squad",
+                    Description = "Combines ORB and Wyckoff Spring to capture morning breakouts and fast fakeout reclaims.",
+                    IsEnabled = false,
+                    StrategyIdsJson = "[2, 7]",
+                    ConsensusRule = "Majority",
+                    MinAgreeingStrategies = 2,
+                    OperatingMode = "ApprovalRequired",
+                    PerTradeStopLossPoint = 12.0m,
+                    PerTradeGainPoint = 35.0m,
+                    TrailingStopLossPoint = 8.0m,
+                    TimeframeMinutes = 5
+                },
+                new StoicTrade.Api.Models.StrategyGroup
+                {
+                    Name = "Institutional Trend & Mitigation",
+                    Description = "Combines EMA Pullback, Fair Value Gap (FVG), and Supertrend for high-conviction trend continuation.",
+                    IsEnabled = false,
+                    StrategyIdsJson = "[1, 3, 8]",
+                    ConsensusRule = "Majority",
+                    MinAgreeingStrategies = 2,
+                    OperatingMode = "ApprovalRequired",
+                    PerTradeStopLossPoint = 10.0m,
+                    PerTradeGainPoint = 30.0m,
+                    TrailingStopLossPoint = 6.0m,
+                    TimeframeMinutes = 5
+                }
+            );
+            dbContext.SaveChanges();
+        }
+    }
+    catch {}
 }
 
 app.Run();

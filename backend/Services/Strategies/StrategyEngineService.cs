@@ -107,8 +107,9 @@ namespace StoicTrade.Api.Services.Strategies
                     using var scope = _serviceProvider.CreateScope();
                     var dbContext = scope.ServiceProvider.GetRequiredService<AppDbContext>();
 
-                    // 4. Fetch enabled strategies from DB
+                    // 4. Fetch enabled strategies and strategy groups from DB
                     var activeConfigs = dbContext.StrategyConfigs.Where(s => s.IsEnabled).ToList();
+                    var activeGroups = dbContext.StrategyGroups.Where(g => g.IsEnabled).ToList();
 
                     // 5. Fetch market data based on TradeMode
                     var globalSettings = dbContext.GlobalSettings.FirstOrDefault();
@@ -129,7 +130,7 @@ namespace StoicTrade.Api.Services.Strategies
                         // marketDataJson = GetFromFyers()
                     }
 
-                    // 3. Evaluate each active strategy
+                    // 6. Evaluate each active standalone strategy
                     var tickSignals = new List<Signal>();
                     var optionEngine = scope.ServiceProvider.GetRequiredService<OptionSelectionEngine>();
                     foreach (var config in activeConfigs)
@@ -179,7 +180,103 @@ namespace StoicTrade.Api.Services.Strategies
                         }
                     }
 
-                    // 4. Aggregate signals
+                    // 7. Evaluate active Strategy Groups (Multi-Strategy Consensus)
+                    var allConfigs = dbContext.StrategyConfigs.ToList();
+                    foreach (var group in activeGroups)
+                    {
+                        List<int> memberIds = new();
+                        try
+                        {
+                            memberIds = System.Text.Json.JsonSerializer.Deserialize<List<int>>(group.StrategyIdsJson) ?? new();
+                        }
+                        catch {}
+
+                        if (!memberIds.Any()) continue;
+
+                        var groupMemberSignals = new List<Signal>();
+                        foreach (var memberId in memberIds)
+                        {
+                            var memberConfig = allConfigs.FirstOrDefault(c => c.Id == memberId);
+                            if (memberConfig == null) continue;
+
+                            var memberStrategy = _strategies.FirstOrDefault(s => s.Name == memberConfig.StrategyName);
+                            if (memberStrategy != null)
+                            {
+                                var memberSig = await memberStrategy.ExecuteAsync(memberConfig, marketDataJson);
+                                if (memberSig != null) groupMemberSignals.Add(memberSig);
+                            }
+                        }
+
+                        if (!groupMemberSignals.Any()) continue;
+
+                        // Consensus evaluation
+                        var buyVotes = groupMemberSignals.Count(s => s.Action == "BUY");
+                        var sellVotes = groupMemberSignals.Count(s => s.Action == "SELL");
+                        int requiredVotes = group.ConsensusRule switch
+                        {
+                            "Unanimous" => memberIds.Count,
+                            "Majority" => Math.Max(2, group.MinAgreeingStrategies),
+                            "Any" => 1,
+                            _ => Math.Max(2, group.MinAgreeingStrategies)
+                        };
+
+                        string? consensusAction = null;
+                        if (buyVotes >= requiredVotes && sellVotes == 0) consensusAction = "BUY";
+                        else if (sellVotes >= requiredVotes && buyVotes == 0) consensusAction = "SELL";
+
+                        if (!string.IsNullOrEmpty(consensusAction))
+                        {
+                            var leaderSignal = groupMemberSignals.First(s => s.Action == consensusAction);
+                            var groupSignal = new Signal
+                            {
+                                StrategyName = $"Group: {group.Name} ({buyVotes + sellVotes}/{memberIds.Count} Agree)",
+                                Action = consensusAction,
+                                Instrument = "NIFTY",
+                                Price = leaderSignal.Price,
+                                StopLossPrice = leaderSignal.StopLossPrice,
+                                TargetPrice = leaderSignal.TargetPrice,
+                                Quantity = leaderSignal.Quantity,
+                                Atr = leaderSignal.Atr,
+                                Rvol = leaderSignal.Rvol,
+                                Priority = 3 // High priority for multi-strategy consensus
+                            };
+
+                            // Resolve option contract
+                            string bias = consensusAction == "BUY" ? "BULLISH" : "BEARISH";
+                            var contract = optionEngine.GetOptimalContract("NIFTY", bias, itmDistance: 1, expiryIndex: 1)
+                                ?? optionEngine.GetOptimalContract("NIFTY", bias, itmDistance: 1, expiryIndex: 0);
+                            if (!string.IsNullOrEmpty(contract))
+                            {
+                                string optSymbol = contract.Replace("NSE:", "");
+                                groupSignal.Instrument = optSymbol;
+                                var optLtp = optionEngine.ResolveOptionLtp(optSymbol);
+                                groupSignal.Price = (optLtp.HasValue && optLtp.Value > 0) ? optLtp.Value : 150m;
+                                groupSignal.ExpectedPrice = groupSignal.Price;
+                            }
+
+                            tickSignals.Add(groupSignal);
+
+                            string logStatus = group.OperatingMode switch
+                            {
+                                "Automatic" => "AutoExecuted",
+                                "ApprovalRequired" => "AwaitingApproval",
+                                "SignalOnly" => "SignalOnly",
+                                _ => "SignalOnly"
+                            };
+                            AddToSignalLog(new SignalLogEntry
+                            {
+                                StrategyName = groupSignal.StrategyName,
+                                Action = groupSignal.Action,
+                                Instrument = groupSignal.Instrument,
+                                Price = groupSignal.Price,
+                                Quantity = groupSignal.Quantity,
+                                Status = logStatus,
+                                GeneratedAt = DateTime.UtcNow
+                            });
+                        }
+                    }
+
+                    // 8. Aggregate signals
                     var aggregator = scope.ServiceProvider.GetRequiredService<SignalAggregatorService>();
                     var aggregatedSignals = aggregator.Aggregate(tickSignals);
 

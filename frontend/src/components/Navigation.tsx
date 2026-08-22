@@ -10,6 +10,7 @@ import {
   List, 
   Briefcase, 
   Cpu, 
+  Layers,
   Settings, 
   Menu, 
   X, 
@@ -24,6 +25,7 @@ const navItems = [
   { name: 'Watchlist', href: '/watchlist', icon: List },
   { name: 'Positions', href: '/positions', icon: Briefcase },
   { name: 'Strategies', href: '/strategies', icon: Cpu },
+  { name: 'Strategy Groups', href: '/strategy-groups', icon: Layers },
   { name: 'Strategy Analysis', href: '/strategy-analysis', icon: Activity },
   { name: 'Settings', href: '/settings', icon: Settings }
 ];
