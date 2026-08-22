@@ -402,9 +402,20 @@ function PendingApprovalsSection() {
         {approvals.map(app => (
           <div key={app.id} className="bg-white dark:bg-slate-800 p-4 rounded-xl border border-orange-100 dark:border-orange-900 flex flex-col md:flex-row md:items-center justify-between gap-4">
             <div>
-              <span className="inline-block px-2 py-1 bg-slate-100 dark:bg-slate-700 rounded text-xs font-bold mb-2">
-                {app.signal.strategyName}
-              </span>
+              <div className="flex items-center gap-2 mb-2">
+                {app.signal.strategyName.startsWith("Group:") ? (
+                  <span className="inline-block px-2.5 py-0.5 bg-primary/15 text-primary border border-primary/20 rounded text-xs font-bold">
+                    🛡️ Squad Consensus Approval
+                  </span>
+                ) : (
+                  <span className="inline-block px-2 py-0.5 bg-slate-100 dark:bg-slate-700 rounded text-xs font-bold">
+                    Standalone Strategy
+                  </span>
+                )}
+                <span className="text-xs font-semibold text-slate-600 dark:text-slate-300 truncate max-w-xs">
+                  {app.signal.strategyName}
+                </span>
+              </div>
               <p className="font-bold text-lg">
                 <span className={app.signal.action === 'BUY' ? 'text-green-500' : 'text-danger'}>{app.signal.action}</span> 
                 {' '}{app.signal.quantity} {app.signal.instrument}

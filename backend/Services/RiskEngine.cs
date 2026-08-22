@@ -79,24 +79,57 @@ namespace StoicTrade.Api.Services
                 return false;
             }
 
-            // 5. Check Operating Mode
-            var strategyConfig = dbContext.StrategyConfigs.FirstOrDefault(s => s.StrategyName == signal.StrategyName);
-            if (strategyConfig != null)
+            // 5. Check Operating Mode (Supports both StrategyGroups and StrategyConfigs)
+            string operatingMode = "Automatic";
+
+            if (signal.StrategyName.StartsWith("Group: ", StringComparison.OrdinalIgnoreCase))
             {
-                if (strategyConfig.OperatingMode == "SignalOnly")
+                // Find matching StrategyGroup
+                var activeGroups = dbContext.StrategyGroups.ToList();
+                var matchingGroup = activeGroups.FirstOrDefault(g => signal.StrategyName.Contains(g.Name, StringComparison.OrdinalIgnoreCase));
+                if (matchingGroup != null)
                 {
-                    _logger.LogInformation("RiskEngine: Mode is SignalOnly. Logging signal but not executing.");
-                    return true;
+                    operatingMode = matchingGroup.OperatingMode;
                 }
-                
-                if (strategyConfig.OperatingMode == "ApprovalRequired")
+            }
+            else
+            {
+                // Check if any active StrategyGroup is running. If strategy groups are active, individual member strategies should NOT independently send alerts.
+                var activeGroups = dbContext.StrategyGroups.Where(g => g.IsEnabled).ToList();
+                var strat = dbContext.StrategyConfigs.FirstOrDefault(s => s.StrategyName == signal.StrategyName);
+                if (strat != null)
                 {
-                    _logger.LogInformation("RiskEngine: Mode is ApprovalRequired. Holding signal for manual approval.");
-                    var pendingSignalId = Guid.NewGuid().ToString();
-                    var pendingSignalJson = System.Text.Json.JsonSerializer.Serialize(signal);
-                    await _redisService.SetValueAsync($"pending_approval:{accountId}:{pendingSignalId}", pendingSignalJson, TimeSpan.FromMinutes(10));
-                    return true;
+                    bool isPartOfActiveGroup = activeGroups.Any(g => {
+                        try {
+                            var ids = System.Text.Json.JsonSerializer.Deserialize<System.Collections.Generic.List<int>>(g.StrategyIdsJson) ?? new();
+                            return ids.Contains(strat.Id);
+                        } catch { return false; }
+                    });
+
+                    // If it is part of an active squad and not explicitly enabled standalone, suppress individual alert
+                    if (isPartOfActiveGroup && !strat.IsEnabled)
+                    {
+                        _logger.LogInformation("RiskEngine: Suppressing standalone alert for {StrategyName} because it belongs to an active Strategy Group.", signal.StrategyName);
+                        return true;
+                    }
+
+                    operatingMode = strat.OperatingMode;
                 }
+            }
+
+            if (operatingMode == "SignalOnly")
+            {
+                _logger.LogInformation("RiskEngine: Mode is SignalOnly. Logging signal but not executing.");
+                return true;
+            }
+            
+            if (operatingMode == "ApprovalRequired")
+            {
+                _logger.LogInformation("RiskEngine: Mode is ApprovalRequired for {StrategyName}. Holding signal for manual approval.", signal.StrategyName);
+                var pendingSignalId = Guid.NewGuid().ToString();
+                var pendingSignalJson = System.Text.Json.JsonSerializer.Serialize(signal);
+                await _redisService.SetValueAsync($"pending_approval:{accountId}:{pendingSignalId}", pendingSignalJson, TimeSpan.FromMinutes(10));
+                return true;
             }
 
             // If all checks pass and mode is Automatic:
