@@ -184,8 +184,8 @@ using (var scope = app.Services.CreateScope())
             dbContext.StrategyGroups.AddRange(
                 new StoicTrade.Api.Models.StrategyGroup
                 {
-                    Name = "Morning Momentum Trap Squad",
-                    Description = "Combines ORB and Wyckoff Spring to capture morning breakouts and fast fakeout reclaims.",
+                    Name = "Morning Alpha & Liquidity Sweep",
+                    Description = "Combines ORB and Wyckoff Spring to capture explosive opening breakouts and catch fakeout stop hunts.",
                     IsEnabled = false,
                     StrategyIdsJson = "[2, 7]",
                     ConsensusRule = "Majority",
@@ -199,7 +199,7 @@ using (var scope = app.Services.CreateScope())
                 new StoicTrade.Api.Models.StrategyGroup
                 {
                     Name = "Institutional Trend & Mitigation",
-                    Description = "Combines EMA Pullback, Fair Value Gap (FVG), and Supertrend for high-conviction trend continuation.",
+                    Description = "Combines Supertrend Rider, EMA Pullback, and Fair Value Gap (FVG) for high-conviction trend continuation.",
                     IsEnabled = false,
                     StrategyIdsJson = "[1, 3, 8]",
                     ConsensusRule = "Majority",
@@ -208,6 +208,48 @@ using (var scope = app.Services.CreateScope())
                     PerTradeStopLossPoint = 10.0m,
                     PerTradeGainPoint = 30.0m,
                     TrailingStopLossPoint = 6.0m,
+                    TimeframeMinutes = 5
+                },
+                new StoicTrade.Api.Models.StrategyGroup
+                {
+                    Name = "Volatility Compression & Expansion",
+                    Description = "Combines Bollinger Volatility Squeeze and NR7 Breakout to catch massive explosive breakout moves.",
+                    IsEnabled = false,
+                    StrategyIdsJson = "[4, 5]",
+                    ConsensusRule = "Unanimous",
+                    MinAgreeingStrategies = 2,
+                    OperatingMode = "ApprovalRequired",
+                    PerTradeStopLossPoint = 12.0m,
+                    PerTradeGainPoint = 40.0m,
+                    TrailingStopLossPoint = 10.0m,
+                    TimeframeMinutes = 5
+                },
+                new StoicTrade.Api.Models.StrategyGroup
+                {
+                    Name = "Momentum Trend Reversal Strike Force",
+                    Description = "Combines Supertrend Rider, MACD Zero-Line, and Wyckoff Spring for high-precision trend reversal entries.",
+                    IsEnabled = false,
+                    StrategyIdsJson = "[1, 6, 7]",
+                    ConsensusRule = "Majority",
+                    MinAgreeingStrategies = 2,
+                    OperatingMode = "ApprovalRequired",
+                    PerTradeStopLossPoint = 10.0m,
+                    PerTradeGainPoint = 30.0m,
+                    TrailingStopLossPoint = 7.0m,
+                    TimeframeMinutes = 5
+                },
+                new StoicTrade.Api.Models.StrategyGroup
+                {
+                    Name = "Master All-Weather Confluence Squad",
+                    Description = "Heavy 5-strategy confluence unit. Requires at least 3 concurring strategies (Supertrend, ORB, EMA, Wyckoff, FVG) before firing.",
+                    IsEnabled = false,
+                    StrategyIdsJson = "[1, 2, 3, 7, 8]",
+                    ConsensusRule = "Majority",
+                    MinAgreeingStrategies = 3,
+                    OperatingMode = "ApprovalRequired",
+                    PerTradeStopLossPoint = 12.0m,
+                    PerTradeGainPoint = 45.0m,
+                    TrailingStopLossPoint = 10.0m,
                     TimeframeMinutes = 5
                 }
             );

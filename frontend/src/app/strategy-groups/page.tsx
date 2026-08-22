@@ -276,20 +276,20 @@ export default function StrategyGroupsPage() {
           <Sparkles className="w-4 h-4 text-primary" />
           <h3 className="text-xs font-bold uppercase tracking-wider text-primary">1-Click High-Confluence Presets</h3>
         </div>
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+        <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-5 gap-3">
           <button
             onClick={() => applyPreset(
-              "Morning Momentum Trap Squad",
+              "Morning Alpha & Liquidity Sweep",
               ["Opening Range Breakout", "Wyckoff Spring"],
               "Majority",
-              "Captures opening breakouts or immediate fakeout absorption sweeps with tight stop loss."
+              "Captures explosive 9:15–10:15 AM opening range expansions and catches institutional fakeout liquidity sweeps."
             )}
             className="text-left p-3.5 rounded-xl bg-surface hover:border-primary/50 border border-slate-200 dark:border-slate-800 transition-all shadow-sm group"
           >
-            <div className="font-bold text-sm text-slate-900 dark:text-white group-hover:text-primary transition-colors">
-              🌅 Morning Momentum Trap
+            <div className="font-bold text-xs text-slate-900 dark:text-white group-hover:text-primary transition-colors truncate">
+              🌅 Morning Alpha & Sweep
             </div>
-            <div className="text-xs text-slate-500 mt-1">ORB + Wyckoff Spring (Majority Consensus)</div>
+            <div className="text-[11px] text-slate-500 mt-1 line-clamp-2">ORB + Wyckoff Spring (2/2 Agree)</div>
           </button>
 
           <button
@@ -301,25 +301,55 @@ export default function StrategyGroupsPage() {
             )}
             className="text-left p-3.5 rounded-xl bg-surface hover:border-primary/50 border border-slate-200 dark:border-slate-800 transition-all shadow-sm group"
           >
-            <div className="font-bold text-sm text-slate-900 dark:text-white group-hover:text-primary transition-colors">
-              🏛️ Trend & Mitigation Syndicate
+            <div className="font-bold text-xs text-slate-900 dark:text-white group-hover:text-primary transition-colors truncate">
+              🏛️ Trend & Mitigation
             </div>
-            <div className="text-xs text-slate-500 mt-1">Supertrend + EMA Pullback + FVG (2+ Agree)</div>
+            <div className="text-[11px] text-slate-500 mt-1 line-clamp-2">Supertrend + EMA + FVG (2+ Agree)</div>
           </button>
 
           <button
             onClick={() => applyPreset(
-              "Volatility Explosion Unit",
+              "Volatility Compression & Expansion",
               ["Bollinger Volatility Squeeze", "NR7 Breakout"],
               "Unanimous",
-              "Requires extreme volatility compression and price range contraction before a massive breakout."
+              "Combines standard deviation band squeezes with 7-candle narrow range contraction to catch high-velocity breakouts."
             )}
             className="text-left p-3.5 rounded-xl bg-surface hover:border-primary/50 border border-slate-200 dark:border-slate-800 transition-all shadow-sm group"
           >
-            <div className="font-bold text-sm text-slate-900 dark:text-white group-hover:text-primary transition-colors">
-              💥 Volatility Explosion Unit
+            <div className="font-bold text-xs text-slate-900 dark:text-white group-hover:text-primary transition-colors truncate">
+              💥 Volatility Expansion
             </div>
-            <div className="text-xs text-slate-500 mt-1">Bollinger Squeeze + NR7 (Unanimous 100%)</div>
+            <div className="text-[11px] text-slate-500 mt-1 line-clamp-2">Bollinger Squeeze + NR7 (100% Unanimous)</div>
+          </button>
+
+          <button
+            onClick={() => applyPreset(
+              "Momentum Trend Reversal Strike Force",
+              ["Supertrend Rider", "MACD Zero-Line", "Wyckoff Spring"],
+              "Majority",
+              "Combines MACD zero-line momentum crossovers, Supertrend bias, and Wyckoff absorption for high-precision trend reversals."
+            )}
+            className="text-left p-3.5 rounded-xl bg-surface hover:border-primary/50 border border-slate-200 dark:border-slate-800 transition-all shadow-sm group"
+          >
+            <div className="font-bold text-xs text-slate-900 dark:text-white group-hover:text-primary transition-colors truncate">
+              ⚡ Momentum Reversal
+            </div>
+            <div className="text-[11px] text-slate-500 mt-1 line-clamp-2">Supertrend + MACD + Wyckoff (2+ Agree)</div>
+          </button>
+
+          <button
+            onClick={() => applyPreset(
+              "Master All-Weather Confluence Squad",
+              ["Supertrend Rider", "Opening Range Breakout", "EMA Pullback", "Wyckoff Spring", "Fair Value Gap"],
+              "Majority",
+              "Heavy 5-strategy confluence unit. Requires at least 3 concurring strategies before firing."
+            )}
+            className="text-left p-3.5 rounded-xl bg-surface hover:border-primary/50 border border-slate-200 dark:border-slate-800 transition-all shadow-sm group"
+          >
+            <div className="font-bold text-xs text-slate-900 dark:text-white group-hover:text-primary transition-colors truncate">
+              🛡️ Master All-Weather
+            </div>
+            <div className="text-[11px] text-slate-500 mt-1 line-clamp-2">5-Strategy Confluence (3+ Agree)</div>
           </button>
         </div>
       </div>
