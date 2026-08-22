@@ -45,7 +45,9 @@ namespace StoicTrade.Api.Data
                 new StrategyConfig { Id = 3, StrategyName = "EMA Pullback", IsEnabled = false, OperatingMode = "ApprovalRequired", PerTradeStopLossPoint = 10, PerTradeGainPoint = 20, TimeframeMinutes = 5, TrailingStopLossPoint = 5 },
                 new StrategyConfig { Id = 4, StrategyName = "Bollinger Volatility Squeeze", IsEnabled = false, OperatingMode = "ApprovalRequired", PerTradeStopLossPoint = 12, PerTradeGainPoint = 25, TimeframeMinutes = 5, TrailingStopLossPoint = 5 },
                 new StrategyConfig { Id = 5, StrategyName = "NR7 Breakout", IsEnabled = false, OperatingMode = "ApprovalRequired", PerTradeStopLossPoint = 15, PerTradeGainPoint = 35, TimeframeMinutes = 5, TrailingStopLossPoint = 8 },
-                new StrategyConfig { Id = 6, StrategyName = "MACD Zero-Line", IsEnabled = false, OperatingMode = "ApprovalRequired", PerTradeStopLossPoint = 10, PerTradeGainPoint = 20, TimeframeMinutes = 5, TrailingStopLossPoint = 5 }
+                new StrategyConfig { Id = 6, StrategyName = "MACD Zero-Line", IsEnabled = false, OperatingMode = "ApprovalRequired", PerTradeStopLossPoint = 10, PerTradeGainPoint = 20, TimeframeMinutes = 5, TrailingStopLossPoint = 5 },
+                new StrategyConfig { Id = 7, StrategyName = "Wyckoff Spring (Liquidity Sweep)", IsEnabled = false, OperatingMode = "ApprovalRequired", PerTradeStopLossPoint = 10, PerTradeGainPoint = 35, TimeframeMinutes = 5, TrailingStopLossPoint = 8 },
+                new StrategyConfig { Id = 8, StrategyName = "Fair Value Gap (FVG) / Order Block", IsEnabled = false, OperatingMode = "ApprovalRequired", PerTradeStopLossPoint = 12, PerTradeGainPoint = 30, TimeframeMinutes = 5, TrailingStopLossPoint = 6 }
             );
         }
     }

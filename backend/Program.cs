@@ -47,6 +47,7 @@ builder.Services.AddSingleton<RedisService>();
 builder.Services.AddSingleton<MarketDataCache>();
 builder.Services.AddSingleton<MarketDataAggregatorService>();
 builder.Services.AddHostedService<FyersDataPollingService>();
+builder.Services.AddSingleton<StoicTrade.Api.Services.MarketData.OptionChainAnalysisService>();
 builder.Services.AddSingleton<StoicTrade.Api.Services.Strategies.OptionSelectionEngine>();
 builder.Services.AddSingleton<FyersApiService>();
 builder.Services.AddSingleton<KillSwitchService>();
@@ -60,6 +61,8 @@ builder.Services.AddSingleton<StoicTrade.Api.Services.Strategies.IStrategy, Stoi
 builder.Services.AddSingleton<StoicTrade.Api.Services.Strategies.IStrategy, StoicTrade.Api.Services.Strategies.BollingerSqueezeStrategy>();
 builder.Services.AddSingleton<StoicTrade.Api.Services.Strategies.IStrategy, StoicTrade.Api.Services.Strategies.Nr7Strategy>();
 builder.Services.AddSingleton<StoicTrade.Api.Services.Strategies.IStrategy, StoicTrade.Api.Services.Strategies.MacdStrategy>();
+builder.Services.AddSingleton<StoicTrade.Api.Services.Strategies.IStrategy, StoicTrade.Api.Services.Strategies.WyckoffSpringStrategy>();
+builder.Services.AddSingleton<StoicTrade.Api.Services.Strategies.IStrategy, StoicTrade.Api.Services.Strategies.FairValueGapStrategy>();
 
 builder.Services.AddSingleton<StoicTrade.Api.Services.Strategies.SignalAggregatorService>();
 
@@ -139,6 +142,20 @@ using (var scope = app.Services.CreateScope())
                 CreatedAt TEXT NOT NULL,
                 UpdatedAt TEXT NOT NULL
             )");
+    }
+    catch {}
+
+    try
+    {
+        if (!dbContext.StrategyConfigs.Any(s => s.Id == 7))
+        {
+            dbContext.StrategyConfigs.Add(new StoicTrade.Api.Models.StrategyConfig { Id = 7, StrategyName = "Wyckoff Spring (Liquidity Sweep)", IsEnabled = false, OperatingMode = "ApprovalRequired", PerTradeStopLossPoint = 10, PerTradeGainPoint = 35, TimeframeMinutes = 5, TrailingStopLossPoint = 8 });
+        }
+        if (!dbContext.StrategyConfigs.Any(s => s.Id == 8))
+        {
+            dbContext.StrategyConfigs.Add(new StoicTrade.Api.Models.StrategyConfig { Id = 8, StrategyName = "Fair Value Gap (FVG) / Order Block", IsEnabled = false, OperatingMode = "ApprovalRequired", PerTradeStopLossPoint = 12, PerTradeGainPoint = 30, TimeframeMinutes = 5, TrailingStopLossPoint = 6 });
+        }
+        dbContext.SaveChanges();
     }
     catch {}
 }

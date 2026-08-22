@@ -101,16 +101,23 @@ export default function StrategiesPage() {
     if (name.includes("Supertrend")) {
       const atr = params.atrPeriod ?? 14;
       const mult = params.multiplier ?? 3;
+      const useOptionGate = params.useOptionGate ?? true;
       return (
-        <div className="grid grid-cols-2 gap-4 mt-4 pt-4 border-t border-slate-100 dark:border-slate-800">
-          <div>
-            <label className="block text-xs font-semibold text-primary uppercase tracking-wider mb-1">ATR Period</label>
-            <input type="number" value={atr} onChange={e => updateAdditionalParam(strategy.id, 'atrPeriod', Number(e.target.value))} className="w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-transparent focus:ring-2 focus:ring-primary outline-none" />
+        <div className="space-y-4 mt-4 pt-4 border-t border-slate-100 dark:border-slate-800">
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="block text-xs font-semibold text-primary uppercase tracking-wider mb-1">ATR Period</label>
+              <input type="number" value={atr} onChange={e => updateAdditionalParam(strategy.id, 'atrPeriod', Number(e.target.value))} className="w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-transparent focus:ring-2 focus:ring-primary outline-none" />
+            </div>
+            <div>
+              <label className="block text-xs font-semibold text-primary uppercase tracking-wider mb-1">Multiplier</label>
+              <input type="number" value={mult} onChange={e => updateAdditionalParam(strategy.id, 'multiplier', Number(e.target.value))} className="w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-transparent focus:ring-2 focus:ring-primary outline-none" />
+            </div>
           </div>
-          <div>
-            <label className="block text-xs font-semibold text-primary uppercase tracking-wider mb-1">Multiplier</label>
-            <input type="number" value={mult} onChange={e => updateAdditionalParam(strategy.id, 'multiplier', Number(e.target.value))} className="w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-transparent focus:ring-2 focus:ring-primary outline-none" />
-          </div>
+          <label className="flex items-center gap-2 cursor-pointer text-xs font-medium text-slate-700 dark:text-slate-300">
+            <input type="checkbox" checked={useOptionGate} onChange={e => updateAdditionalParam(strategy.id, 'useOptionGate', e.target.checked)} className="w-4 h-4 text-primary rounded" />
+            <span>Institutional Option Chain Floor & PCR Gate</span>
+          </label>
         </div>
       );
     }
@@ -118,16 +125,23 @@ export default function StrategiesPage() {
     if (name.includes("EMA Pullback")) {
       const fast = params.fastEma ?? 9;
       const slow = params.slowEma ?? 21;
+      const checkFvg = params.checkFvg ?? false;
       return (
-        <div className="grid grid-cols-2 gap-4 mt-4 pt-4 border-t border-slate-100 dark:border-slate-800">
-          <div>
-            <label className="block text-xs font-semibold text-primary uppercase tracking-wider mb-1">Fast EMA</label>
-            <input type="number" value={fast} onChange={e => updateAdditionalParam(strategy.id, 'fastEma', Number(e.target.value))} className="w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-transparent focus:ring-2 focus:ring-primary outline-none" />
+        <div className="space-y-4 mt-4 pt-4 border-t border-slate-100 dark:border-slate-800">
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="block text-xs font-semibold text-primary uppercase tracking-wider mb-1">Fast EMA</label>
+              <input type="number" value={fast} onChange={e => updateAdditionalParam(strategy.id, 'fastEma', Number(e.target.value))} className="w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-transparent focus:ring-2 focus:ring-primary outline-none" />
+            </div>
+            <div>
+              <label className="block text-xs font-semibold text-primary uppercase tracking-wider mb-1">Slow EMA</label>
+              <input type="number" value={slow} onChange={e => updateAdditionalParam(strategy.id, 'slowEma', Number(e.target.value))} className="w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-transparent focus:ring-2 focus:ring-primary outline-none" />
+            </div>
           </div>
-          <div>
-            <label className="block text-xs font-semibold text-primary uppercase tracking-wider mb-1">Slow EMA</label>
-            <input type="number" value={slow} onChange={e => updateAdditionalParam(strategy.id, 'slowEma', Number(e.target.value))} className="w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-transparent focus:ring-2 focus:ring-primary outline-none" />
-          </div>
+          <label className="flex items-center gap-2 cursor-pointer text-xs font-medium text-slate-700 dark:text-slate-300">
+            <input type="checkbox" checked={checkFvg} onChange={e => updateAdditionalParam(strategy.id, 'checkFvg', e.target.checked)} className="w-4 h-4 text-primary rounded" />
+            <span>Confluence: Low must tap Bullish FVG (Fair Value Gap)</span>
+          </label>
         </div>
       );
     }
@@ -157,28 +171,69 @@ export default function StrategiesPage() {
     if (name.includes("Bollinger")) {
       const period = params.bbPeriod ?? 20;
       const dev = params.bbStdDev ?? 2;
+      const usePocGate = params.usePocGate ?? true;
       return (
-        <div className="grid grid-cols-2 gap-4 mt-4 pt-4 border-t border-slate-100 dark:border-slate-800">
-          <div>
-            <label className="block text-xs font-semibold text-primary uppercase tracking-wider mb-1">Period</label>
-            <input type="number" value={period} onChange={e => updateAdditionalParam(strategy.id, 'bbPeriod', Number(e.target.value))} className="w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-transparent focus:ring-2 focus:ring-primary outline-none" />
+        <div className="space-y-4 mt-4 pt-4 border-t border-slate-100 dark:border-slate-800">
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="block text-xs font-semibold text-primary uppercase tracking-wider mb-1">Period</label>
+              <input type="number" value={period} onChange={e => updateAdditionalParam(strategy.id, 'bbPeriod', Number(e.target.value))} className="w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-transparent focus:ring-2 focus:ring-primary outline-none" />
+            </div>
+            <div>
+              <label className="block text-xs font-semibold text-primary uppercase tracking-wider mb-1">Std Dev</label>
+              <input type="number" value={dev} onChange={e => updateAdditionalParam(strategy.id, 'bbStdDev', Number(e.target.value))} className="w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-transparent focus:ring-2 focus:ring-primary outline-none" />
+            </div>
           </div>
-          <div>
-            <label className="block text-xs font-semibold text-primary uppercase tracking-wider mb-1">Std Dev</label>
-            <input type="number" value={dev} onChange={e => updateAdditionalParam(strategy.id, 'bbStdDev', Number(e.target.value))} className="w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-transparent focus:ring-2 focus:ring-primary outline-none" />
-          </div>
+          <label className="flex items-center gap-2 cursor-pointer text-xs font-medium text-slate-700 dark:text-slate-300">
+            <input type="checkbox" checked={usePocGate} onChange={e => updateAdditionalParam(strategy.id, 'usePocGate', e.target.checked)} className="w-4 h-4 text-primary rounded" />
+            <span>Volume Profile POC Acceptance Filter</span>
+          </label>
         </div>
       );
     }
 
     if (name.includes("ORB")) {
       const useVwap = params.useVwap ?? true;
+      const useOptionGate = params.useOptionGate ?? true;
+      return (
+        <div className="space-y-3 mt-4 pt-4 border-t border-slate-100 dark:border-slate-800">
+          <label className="flex items-center gap-2 cursor-pointer text-xs font-medium text-slate-700 dark:text-slate-300">
+            <input type="checkbox" checked={useVwap} onChange={e => updateAdditionalParam(strategy.id, 'useVwap', e.target.checked)} className="w-4 h-4 text-primary rounded" />
+            <span>Require VWAP Confirmation</span>
+          </label>
+          <label className="flex items-center gap-2 cursor-pointer text-xs font-medium text-slate-700 dark:text-slate-300">
+            <input type="checkbox" checked={useOptionGate} onChange={e => updateAdditionalParam(strategy.id, 'useOptionGate', e.target.checked)} className="w-4 h-4 text-primary rounded" />
+            <span>Option Chain Floor Defense Confirmation</span>
+          </label>
+        </div>
+      );
+    }
+
+    if (name.includes("Wyckoff")) {
+      const lookback = params.lookback ?? 20;
+      const minRvol = params.minRvol ?? 1.8;
+      return (
+        <div className="grid grid-cols-2 gap-4 mt-4 pt-4 border-t border-slate-100 dark:border-slate-800">
+          <div>
+            <label className="block text-xs font-semibold text-primary uppercase tracking-wider mb-1">Support Lookback (Bars)</label>
+            <input type="number" value={lookback} onChange={e => updateAdditionalParam(strategy.id, 'lookback', Number(e.target.value))} className="w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-transparent focus:ring-2 focus:ring-primary outline-none" />
+          </div>
+          <div>
+            <label className="block text-xs font-semibold text-primary uppercase tracking-wider mb-1">Min RVOL Sweep</label>
+            <input type="number" step="0.1" value={minRvol} onChange={e => updateAdditionalParam(strategy.id, 'minRvol', Number(e.target.value))} className="w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-transparent focus:ring-2 focus:ring-primary outline-none" />
+          </div>
+        </div>
+      );
+    }
+
+    if (name.includes("Fair Value Gap") || name.includes("FVG")) {
+      const minGap = params.minGapPoints ?? 8;
       return (
         <div className="grid grid-cols-1 gap-4 mt-4 pt-4 border-t border-slate-100 dark:border-slate-800">
-          <label className="flex items-center gap-2 cursor-pointer">
-            <input type="checkbox" checked={useVwap} onChange={e => updateAdditionalParam(strategy.id, 'useVwap', e.target.checked)} className="w-4 h-4 text-primary rounded" />
-            <span className="font-semibold text-sm">Require VWAP Confirmation</span>
-          </label>
+          <div>
+            <label className="block text-xs font-semibold text-primary uppercase tracking-wider mb-1">Min Imbalance Gap (Points)</label>
+            <input type="number" value={minGap} onChange={e => updateAdditionalParam(strategy.id, 'minGapPoints', Number(e.target.value))} className="w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-transparent focus:ring-2 focus:ring-primary outline-none" />
+          </div>
         </div>
       );
     }

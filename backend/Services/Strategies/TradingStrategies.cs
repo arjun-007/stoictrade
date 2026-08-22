@@ -12,7 +12,7 @@ namespace StoicTrade.Api.Services.Strategies
 {
     /// <summary>
     /// Shared precision calculation utilities for relative volume, ATR risk targets, 
-    /// higher timeframe gates, and intraday chop filters.
+    /// higher timeframe gates, intraday chop filters, and institutional option chain / POC gates.
     /// </summary>
     public static class StrategyFilterHelper
     {
@@ -79,6 +79,26 @@ namespace StoicTrade.Api.Services.Strategies
 
             return true;
         }
+
+        /// <summary>
+        /// Institutional Option Chain Gate: Confirms Put Writing Floor & PCR support before entering BUY signals.
+        /// </summary>
+        public static bool CheckInstitutionalGate(OptionChainAnalysisService optionChain, decimal spotPrice, string action)
+        {
+            if (optionChain == null) return true;
+            var metrics = optionChain.GetMetrics("NIFTY", spotPrice);
+            
+            if (action == "BUY")
+            {
+                // Must have healthy PCR >= 0.85 and price above institutional put floor
+                return metrics.Pcr >= 0.85m && spotPrice >= (metrics.InstitutionalFloorStrike - 50m);
+            }
+            else if (action == "SELL")
+            {
+                return metrics.Pcr <= 1.25m && spotPrice <= (metrics.InstitutionalCeilingStrike + 50m);
+            }
+            return true;
+        }
     }
 
     public class SupertrendStrategy : IStrategy
@@ -86,14 +106,16 @@ namespace StoicTrade.Api.Services.Strategies
         private readonly ILogger<SupertrendStrategy> _logger;
         private readonly MarketDataAggregatorService _aggregator;
         private readonly RedisService _redis;
+        private readonly OptionChainAnalysisService _optionChain;
 
         public string Name => "Supertrend Rider";
 
-        public SupertrendStrategy(ILogger<SupertrendStrategy> logger, MarketDataAggregatorService aggregator, RedisService redis)
+        public SupertrendStrategy(ILogger<SupertrendStrategy> logger, MarketDataAggregatorService aggregator, RedisService redis, OptionChainAnalysisService optionChain)
         {
             _logger = logger;
             _aggregator = aggregator;
             _redis = redis;
+            _optionChain = optionChain;
         }
 
         public async Task<Signal?> ExecuteAsync(StrategyConfig config, string marketData)
@@ -104,6 +126,7 @@ namespace StoicTrade.Api.Services.Strategies
             var paramsDoc = JsonDocument.Parse(config.AdditionalParamsJson ?? "{}");
             int atrPeriod = paramsDoc.RootElement.TryGetProperty("atrPeriod", out var atrElem) ? atrElem.GetInt32() : 10;
             int multiplier = paramsDoc.RootElement.TryGetProperty("multiplier", out var multElem) ? multElem.GetInt32() : 2;
+            bool useOptionGate = paramsDoc.RootElement.TryGetProperty("useOptionGate", out var optElem) && optElem.GetBoolean();
 
             var stResults = candles.GetSuperTrend(atrPeriod, multiplier).ToList();
             var lastSt = stResults.LastOrDefault();
@@ -116,20 +139,20 @@ namespace StoicTrade.Api.Services.Strategies
             string stateKey = $"strategy_state_{config.Id}";
             var currentState = await _redis.GetValueAsync(stateKey) ?? "Idle";
 
-            // Entry filter: Require two consecutive green closes above SuperTrend line or HTF trend alignment
             bool consecutiveGreen = prevCandle != null && prevSt != null && prevSt.SuperTrend != null &&
                                     prevCandle.Close > (decimal)prevSt.SuperTrend &&
                                     lastCandle.Close > (decimal)lastSt.SuperTrend;
 
             if (currentState == "Idle" && (consecutiveGreen || lastCandle.Close > (decimal)lastSt.SuperTrend))
             {
-                // Midday chop check
                 decimal rvol = StrategyFilterHelper.CalculateRvol(candles);
                 if (StrategyFilterHelper.IsMiddayChopHours() && rvol < 2.0m)
                     return null;
 
-                // HTF Gate
                 if (!StrategyFilterHelper.CheckHtfGate(_aggregator, "BUY"))
+                    return null;
+
+                if (useOptionGate && !StrategyFilterHelper.CheckInstitutionalGate(_optionChain, lastCandle.Close, "BUY"))
                     return null;
 
                 decimal atr = StrategyFilterHelper.CalculateAtr(candles);
@@ -175,14 +198,16 @@ namespace StoicTrade.Api.Services.Strategies
         private readonly ILogger<OrbStrategy> _logger;
         private readonly MarketDataAggregatorService _aggregator;
         private readonly RedisService _redis;
+        private readonly OptionChainAnalysisService _optionChain;
 
         public string Name => "Opening Range Breakout (ORB)";
 
-        public OrbStrategy(ILogger<OrbStrategy> logger, MarketDataAggregatorService aggregator, RedisService redis)
+        public OrbStrategy(ILogger<OrbStrategy> logger, MarketDataAggregatorService aggregator, RedisService redis, OptionChainAnalysisService optionChain)
         {
             _logger = logger;
             _aggregator = aggregator;
             _redis = redis;
+            _optionChain = optionChain;
         }
 
         public async Task<Signal?> ExecuteAsync(StrategyConfig config, string marketData)
@@ -191,12 +216,13 @@ namespace StoicTrade.Api.Services.Strategies
             if (candles.Count < 5) return null;
 
             var paramsDoc = JsonDocument.Parse(config.AdditionalParamsJson ?? "{}");
-            bool useVwap = paramsDoc.RootElement.TryGetProperty("useVwap", out var vwapElem) ? vwapElem.GetBoolean() : true;
+            bool useVwap = !paramsDoc.RootElement.TryGetProperty("useVwap", out var vwapElem) || vwapElem.GetBoolean();
+            bool useOptionGate = paramsDoc.RootElement.TryGetProperty("useOptionGate", out var optElem) && optElem.GetBoolean();
 
             var ist = TimeZoneHelper.GetIstTimeZone();
             var todayIst = TimeZoneInfo.ConvertTimeFromUtc(DateTime.UtcNow, ist).Date;
             var todayCandles = candles.Where(c => TimeZoneInfo.ConvertTimeFromUtc(c.Date, ist).Date == todayIst).ToList();
-            if (todayCandles.Count < 3) return null; // Need at least 15m of opening candles
+            if (todayCandles.Count < 3) return null;
 
             var orbHigh = todayCandles.Take(3).Max(c => c.High);
             var orbLow = todayCandles.Take(3).Min(c => c.Low);
@@ -215,9 +241,8 @@ namespace StoicTrade.Api.Services.Strategies
 
             if (currentState == "Idle")
             {
-                // Breakout above ORB High with RVOL confirmation
                 decimal rvol = StrategyFilterHelper.CalculateRvol(todayCandles, 10);
-                if (rvol < 1.5m) return null; // RVOL Gate for Breakouts
+                if (rvol < 1.5m) return null;
 
                 if (StrategyFilterHelper.IsMiddayChopHours() && rvol < 2.5m)
                     return null;
@@ -225,6 +250,9 @@ namespace StoicTrade.Api.Services.Strategies
                 if (lastCandle.Close > orbHigh && (!useVwap || lastCandle.Close > vwap))
                 {
                     if (!StrategyFilterHelper.CheckHtfGate(_aggregator, "BUY"))
+                        return null;
+
+                    if (useOptionGate && !StrategyFilterHelper.CheckInstitutionalGate(_optionChain, lastCandle.Close, "BUY"))
                         return null;
 
                     decimal atr = StrategyFilterHelper.CalculateAtr(candles);
@@ -248,22 +276,19 @@ namespace StoicTrade.Api.Services.Strategies
                     };
                 }
             }
-            else if (currentState == "InPosition_Long")
+            else if (currentState == "InPosition_Long" && lastCandle.Close < orbLow)
             {
-                if (lastCandle.Close < orbLow)
+                await _redis.DeleteKeyAsync(stateKey);
+                return new Signal
                 {
-                    await _redis.DeleteKeyAsync(stateKey);
-                    return new Signal
-                    {
-                        StrategyName = Name,
-                        Instrument = "NIFTY",
-                        Action = "SELL",
-                        Quantity = 65,
-                        OrderType = "MARKET",
-                        Price = lastCandle.Close,
-                        Priority = 3
-                    };
-                }
+                    StrategyName = Name,
+                    Instrument = "NIFTY",
+                    Action = "SELL",
+                    Quantity = 65,
+                    OrderType = "MARKET",
+                    Price = lastCandle.Close,
+                    Priority = 3
+                };
             }
             return null;
         }
@@ -274,14 +299,16 @@ namespace StoicTrade.Api.Services.Strategies
         private readonly ILogger<EmaPullbackStrategy> _logger;
         private readonly MarketDataAggregatorService _aggregator;
         private readonly RedisService _redis;
+        private readonly OptionChainAnalysisService _optionChain;
 
         public string Name => "EMA Pullback";
 
-        public EmaPullbackStrategy(ILogger<EmaPullbackStrategy> logger, MarketDataAggregatorService aggregator, RedisService redis)
+        public EmaPullbackStrategy(ILogger<EmaPullbackStrategy> logger, MarketDataAggregatorService aggregator, RedisService redis, OptionChainAnalysisService optionChain)
         {
             _logger = logger;
             _aggregator = aggregator;
             _redis = redis;
+            _optionChain = optionChain;
         }
 
         public async Task<Signal?> ExecuteAsync(StrategyConfig config, string marketData)
@@ -292,11 +319,11 @@ namespace StoicTrade.Api.Services.Strategies
             var paramsDoc = JsonDocument.Parse(config.AdditionalParamsJson ?? "{}");
             int fastPeriod = paramsDoc.RootElement.TryGetProperty("fastEma", out var fElem) ? fElem.GetInt32() : 9;
             int slowPeriod = paramsDoc.RootElement.TryGetProperty("slowEma", out var sElem) ? sElem.GetInt32() : 21;
+            bool checkFvg = paramsDoc.RootElement.TryGetProperty("checkFvg", out var fvgElem) && fvgElem.GetBoolean();
 
-            // Trend strength filter: ADX(14) > 20
             var adxResults = candles.GetAdx(14).ToList();
             var lastAdx = adxResults.LastOrDefault()?.Adx;
-            if (lastAdx == null || lastAdx < 20.0) return null; // Reject choppy sideways markets
+            if (lastAdx == null || lastAdx < 20.0) return null;
 
             var fastEma = candles.GetEma(fastPeriod).ToList();
             var slowEma = candles.GetEma(slowPeriod).ToList();
@@ -310,13 +337,19 @@ namespace StoicTrade.Api.Services.Strategies
             string stateKey = $"strategy_state_{config.Id}";
             var currentState = await _redis.GetValueAsync(stateKey) ?? "Idle";
 
-            // Uptrend: Fast > Slow. Pullback: Low dips below Fast EMA but closes above.
             if (currentState == "Idle" && lastFast.Ema > lastSlow.Ema)
             {
                 if (lastCandle.Low <= (decimal)lastFast.Ema && lastCandle.Close > (decimal)lastFast.Ema)
                 {
                     if (StrategyFilterHelper.IsMiddayChopHours()) return null;
                     if (!StrategyFilterHelper.CheckHtfGate(_aggregator, "BUY")) return null;
+
+                    if (checkFvg)
+                    {
+                        var activeFvgs = SmartMoneyStructureHelper.DetectFairValueGaps(candles);
+                        bool isNearFvg = activeFvgs.Any(g => g.IsBullish && Math.Abs(lastCandle.Low - g.Equilibrium) <= 15m);
+                        if (!isNearFvg) return null;
+                    }
 
                     decimal atr = StrategyFilterHelper.CalculateAtr(candles);
                     decimal sl = Math.Round(lastCandle.Close - (1.0m * atr), 2);
@@ -340,22 +373,19 @@ namespace StoicTrade.Api.Services.Strategies
                     };
                 }
             }
-            else if (currentState == "InPosition")
+            else if (currentState == "InPosition" && lastCandle.Close < (decimal)lastSlow.Ema)
             {
-                if (lastCandle.Close < (decimal)lastSlow.Ema)
+                await _redis.DeleteKeyAsync(stateKey);
+                return new Signal
                 {
-                    await _redis.DeleteKeyAsync(stateKey);
-                    return new Signal
-                    {
-                        StrategyName = Name,
-                        Instrument = "NIFTY",
-                        Action = "SELL",
-                        Quantity = 65,
-                        OrderType = "MARKET",
-                        Price = lastCandle.Close,
-                        Priority = 1
-                    };
-                }
+                    StrategyName = Name,
+                    Instrument = "NIFTY",
+                    Action = "SELL",
+                    Quantity = 65,
+                    OrderType = "MARKET",
+                    Price = lastCandle.Close,
+                    Priority = 1
+                };
             }
             return null;
         }
@@ -366,14 +396,16 @@ namespace StoicTrade.Api.Services.Strategies
         private readonly ILogger<BollingerSqueezeStrategy> _logger;
         private readonly MarketDataAggregatorService _aggregator;
         private readonly RedisService _redis;
+        private readonly OptionChainAnalysisService _optionChain;
 
         public string Name => "Bollinger Volatility Squeeze";
 
-        public BollingerSqueezeStrategy(ILogger<BollingerSqueezeStrategy> logger, MarketDataAggregatorService aggregator, RedisService redis)
+        public BollingerSqueezeStrategy(ILogger<BollingerSqueezeStrategy> logger, MarketDataAggregatorService aggregator, RedisService redis, OptionChainAnalysisService optionChain)
         {
             _logger = logger;
             _aggregator = aggregator;
             _redis = redis;
+            _optionChain = optionChain;
         }
 
         public async Task<Signal?> ExecuteAsync(StrategyConfig config, string marketData)
@@ -384,6 +416,7 @@ namespace StoicTrade.Api.Services.Strategies
             var paramsDoc = JsonDocument.Parse(config.AdditionalParamsJson ?? "{}");
             int period = paramsDoc.RootElement.TryGetProperty("bbPeriod", out var pElem) ? pElem.GetInt32() : 20;
             double stdDev = paramsDoc.RootElement.TryGetProperty("bbStdDev", out var dElem) ? dElem.GetDouble() : 2.0;
+            bool usePocGate = paramsDoc.RootElement.TryGetProperty("usePocGate", out var pocElem) && pocElem.GetBoolean();
 
             var bb = candles.GetBollingerBands(period, stdDev).ToList();
             var lastBb = bb.Last();
@@ -394,16 +427,21 @@ namespace StoicTrade.Api.Services.Strategies
             string stateKey = $"strategy_state_{config.Id}";
             var currentState = await _redis.GetValueAsync(stateKey) ?? "Idle";
 
-            // Squeeze Breakout: Solid candle body closes outside the upper band
             bool solidBodyBreakout = lastCandle.Close > (decimal)lastBb.UpperBand && lastCandle.Open >= (decimal)lastBb.Sma;
 
             if (currentState == "Idle" && solidBodyBreakout)
             {
                 decimal rvol = StrategyFilterHelper.CalculateRvol(candles);
-                if (rvol < 1.5m) return null; // Reject low-volume false expansion wicks
+                if (rvol < 1.5m) return null;
 
                 if (StrategyFilterHelper.IsMiddayChopHours() && rvol < 2.5m) return null;
                 if (!StrategyFilterHelper.CheckHtfGate(_aggregator, "BUY")) return null;
+
+                if (usePocGate)
+                {
+                    var vp = SmartMoneyStructureHelper.CalculateVolumeProfile(candles);
+                    if (!vp.IsPriceAbovePoc) return null; // Reject if breakout hasn't accepted above POC
+                }
 
                 decimal atr = StrategyFilterHelper.CalculateAtr(candles);
                 decimal sl = Math.Round(lastCandle.Close - (1.0m * atr), 2);
@@ -448,14 +486,16 @@ namespace StoicTrade.Api.Services.Strategies
         private readonly ILogger<Nr7Strategy> _logger;
         private readonly MarketDataAggregatorService _aggregator;
         private readonly RedisService _redis;
+        private readonly OptionChainAnalysisService _optionChain;
 
         public string Name => "NR7 Breakout";
 
-        public Nr7Strategy(ILogger<Nr7Strategy> logger, MarketDataAggregatorService aggregator, RedisService redis)
+        public Nr7Strategy(ILogger<Nr7Strategy> logger, MarketDataAggregatorService aggregator, RedisService redis, OptionChainAnalysisService optionChain)
         {
             _logger = logger;
             _aggregator = aggregator;
             _redis = redis;
+            _optionChain = optionChain;
         }
 
         public async Task<Signal?> ExecuteAsync(StrategyConfig config, string marketData)
@@ -466,7 +506,6 @@ namespace StoicTrade.Api.Services.Strategies
             string stateKey = $"strategy_state_{config.Id}";
             var currentState = await _redis.GetValueAsync(stateKey) ?? "Idle";
 
-            // NR7 logic
             var last7 = candles.Skip(candles.Count - 8).Take(7).ToList();
             var ranges = last7.Select(c => c.High - c.Low).ToList();
             
@@ -479,7 +518,7 @@ namespace StoicTrade.Api.Services.Strategies
             if (currentState == "Idle" && isNr7 && currentCandle.Close > nr7High)
             {
                 decimal rvol = StrategyFilterHelper.CalculateRvol(candles);
-                if (rvol < 1.5m) return null; // Reject low-volume traps
+                if (rvol < 1.5m) return null;
 
                 if (StrategyFilterHelper.IsMiddayChopHours() && rvol < 2.5m) return null;
                 if (!StrategyFilterHelper.CheckHtfGate(_aggregator, "BUY")) return null;
@@ -527,14 +566,16 @@ namespace StoicTrade.Api.Services.Strategies
         private readonly ILogger<MacdStrategy> _logger;
         private readonly MarketDataAggregatorService _aggregator;
         private readonly RedisService _redis;
+        private readonly OptionChainAnalysisService _optionChain;
 
         public string Name => "MACD Zero-Line";
 
-        public MacdStrategy(ILogger<MacdStrategy> logger, MarketDataAggregatorService aggregator, RedisService redis)
+        public MacdStrategy(ILogger<MacdStrategy> logger, MarketDataAggregatorService aggregator, RedisService redis, OptionChainAnalysisService optionChain)
         {
             _logger = logger;
             _aggregator = aggregator;
             _redis = redis;
+            _optionChain = optionChain;
         }
 
         public async Task<Signal?> ExecuteAsync(StrategyConfig config, string marketData)
@@ -554,12 +595,10 @@ namespace StoicTrade.Api.Services.Strategies
 
             if (lastMacd.Macd == null || lastMacd.Signal == null || prevMacd.Macd == null) return null;
 
-            // Momentum confirmation: RSI(14) > 50
             var rsiList = candles.GetRsi(14).ToList();
             var lastRsi = rsiList.LastOrDefault()?.Rsi;
             if (lastRsi == null || lastRsi < 50.0) return null;
 
-            // VWAP confirmation
             var vwapList = candles.GetVwap().ToList();
             var lastVwap = vwapList.LastOrDefault()?.Vwap;
             if (lastVwap.HasValue && lastCandle.Close < (decimal)lastVwap.Value) return null;
@@ -567,7 +606,6 @@ namespace StoicTrade.Api.Services.Strategies
             string stateKey = $"strategy_state_{config.Id}";
             var currentState = await _redis.GetValueAsync(stateKey) ?? "Idle";
 
-            // Crossover above zero
             bool crossover = prevMacd.Macd < prevMacd.Signal && lastMacd.Macd > lastMacd.Signal;
 
             if (currentState == "Idle" && crossover && lastMacd.Macd < 0)
@@ -610,6 +648,187 @@ namespace StoicTrade.Api.Services.Strategies
                     Priority = 1
                 };
             }
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Institutional Strategy 1: Wyckoff Spring / Liquidity Sweep & Fast Reclaim
+    /// Capitalizes on smart money sweeping stop losses below key support with high volume absorption.
+    /// </summary>
+    public class WyckoffSpringStrategy : IStrategy
+    {
+        private readonly ILogger<WyckoffSpringStrategy> _logger;
+        private readonly MarketDataAggregatorService _aggregator;
+        private readonly RedisService _redis;
+        private readonly OptionChainAnalysisService _optionChain;
+
+        public string Name => "Wyckoff Spring (Liquidity Sweep)";
+
+        public WyckoffSpringStrategy(ILogger<WyckoffSpringStrategy> logger, MarketDataAggregatorService aggregator, RedisService redis, OptionChainAnalysisService optionChain)
+        {
+            _logger = logger;
+            _aggregator = aggregator;
+            _redis = redis;
+            _optionChain = optionChain;
+        }
+
+        public async Task<Signal?> ExecuteAsync(StrategyConfig config, string marketData)
+        {
+            var candles = _aggregator.GetCandles("NSE:NIFTY50-INDEX", config.TimeframeMinutes);
+            if (candles.Count < 25) return null;
+
+            var paramsDoc = JsonDocument.Parse(config.AdditionalParamsJson ?? "{}");
+            int lookback = paramsDoc.RootElement.TryGetProperty("lookback", out var lbElem) ? lbElem.GetInt32() : 20;
+            double minRvol = paramsDoc.RootElement.TryGetProperty("minRvol", out var rvElem) ? rvElem.GetDouble() : 1.8;
+
+            var sweepResult = SmartMoneyStructureHelper.DetectWyckoffSpring(candles, lookback, (decimal)minRvol);
+            if (!sweepResult.IsSweepDetected || !sweepResult.IsBullishSpring) return null;
+
+            var lastCandle = candles.Last();
+            string stateKey = $"strategy_state_{config.Id}";
+            var currentState = await _redis.GetValueAsync(stateKey) ?? "Idle";
+
+            if (currentState == "Idle")
+            {
+                // Verify with Option Chain: Institutional floor should defend this zone
+                if (!StrategyFilterHelper.CheckInstitutionalGate(_optionChain, lastCandle.Close, "BUY"))
+                    return null;
+
+                decimal atr = StrategyFilterHelper.CalculateAtr(candles);
+                // Tight Asymmetric Stop-Loss: Right under the liquidity sweep wick
+                decimal sl = sweepResult.StopLossPrice;
+                // Target: 2.2x risk or 2.0x ATR
+                decimal risk = Math.Max(10m, lastCandle.Close - sl);
+                decimal target = Math.Round(lastCandle.Close + (risk * 2.2m), 2);
+
+                await _redis.SetValueAsync(stateKey, "InPosition", TimeSpan.FromHours(8));
+                _logger.LogInformation("Wyckoff Spring BUY triggered at {Price}. SweepLow: {Sweep}, SL: {SL}, Target: {Target}",
+                    lastCandle.Close, sweepResult.SweepPrice, sl, target);
+
+                return new Signal
+                {
+                    StrategyName = Name,
+                    Instrument = "NIFTY",
+                    Action = "BUY",
+                    Quantity = 65,
+                    OrderType = "MARKET",
+                    Price = lastCandle.Close,
+                    StopLossPrice = sl,
+                    TargetPrice = target,
+                    Atr = atr,
+                    Rvol = sweepResult.Rvol,
+                    Priority = 3
+                };
+            }
+            else if (currentState == "InPosition" && lastCandle.Close < sweepResult.SweepPrice)
+            {
+                await _redis.DeleteKeyAsync(stateKey);
+                return new Signal
+                {
+                    StrategyName = Name,
+                    Instrument = "NIFTY",
+                    Action = "SELL",
+                    Quantity = 65,
+                    OrderType = "MARKET",
+                    Price = lastCandle.Close,
+                    Priority = 3
+                };
+            }
+
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Institutional Strategy 2: Fair Value Gap (FVG) / Order Block Mitigation
+    /// Enters when price pulls back to the 50% equilibrium of an unfilled institutional liquidity imbalance.
+    /// </summary>
+    public class FairValueGapStrategy : IStrategy
+    {
+        private readonly ILogger<FairValueGapStrategy> _logger;
+        private readonly MarketDataAggregatorService _aggregator;
+        private readonly RedisService _redis;
+        private readonly OptionChainAnalysisService _optionChain;
+
+        public string Name => "Fair Value Gap (FVG) / Order Block";
+
+        public FairValueGapStrategy(ILogger<FairValueGapStrategy> logger, MarketDataAggregatorService aggregator, RedisService redis, OptionChainAnalysisService optionChain)
+        {
+            _logger = logger;
+            _aggregator = aggregator;
+            _redis = redis;
+            _optionChain = optionChain;
+        }
+
+        public async Task<Signal?> ExecuteAsync(StrategyConfig config, string marketData)
+        {
+            var candles = _aggregator.GetCandles("NSE:NIFTY50-INDEX", config.TimeframeMinutes);
+            if (candles.Count < 20) return null;
+
+            var paramsDoc = JsonDocument.Parse(config.AdditionalParamsJson ?? "{}");
+            decimal minGapPoints = paramsDoc.RootElement.TryGetProperty("minGapPoints", out var gapElem) ? gapElem.GetDecimal() : 8.0m;
+
+            var activeFvgs = SmartMoneyStructureHelper.DetectFairValueGaps(candles, minGapPoints);
+            var latestBullishFvg = activeFvgs.LastOrDefault(g => g.IsBullish);
+            if (latestBullishFvg == null) return null;
+
+            var lastCandle = candles.Last();
+            string stateKey = $"strategy_state_{config.Id}";
+            var currentState = await _redis.GetValueAsync(stateKey) ?? "Idle";
+
+            // Mitigation Entry Condition:
+            // 1. Current candle dips into the FVG (Low <= Equilibrium)
+            // 2. Closes with rejection inside or above the FVG (Close >= Equilibrium)
+            bool isMitigating = lastCandle.Low <= latestBullishFvg.Equilibrium && lastCandle.Close >= latestBullishFvg.BottomPrice;
+
+            if (currentState == "Idle" && isMitigating)
+            {
+                if (StrategyFilterHelper.IsMiddayChopHours()) return null;
+                if (!StrategyFilterHelper.CheckHtfGate(_aggregator, "BUY")) return null;
+
+                decimal atr = StrategyFilterHelper.CalculateAtr(candles);
+                decimal rvol = StrategyFilterHelper.CalculateRvol(candles);
+
+                // Stop loss: placed safely below the bottom of the institutional FVG
+                decimal sl = Math.Round(latestBullishFvg.BottomPrice - 5.0m, 2);
+                decimal risk = Math.Max(12m, lastCandle.Close - sl);
+                decimal target = Math.Round(lastCandle.Close + (risk * 2.0m), 2);
+
+                await _redis.SetValueAsync(stateKey, "InPosition", TimeSpan.FromHours(8));
+                _logger.LogInformation("FVG Mitigation BUY triggered at {Price}. FVG Range: {Bottom}-{Top}, SL: {SL}, Target: {Target}",
+                    lastCandle.Close, latestBullishFvg.BottomPrice, latestBullishFvg.TopPrice, sl, target);
+
+                return new Signal
+                {
+                    StrategyName = Name,
+                    Instrument = "NIFTY",
+                    Action = "BUY",
+                    Quantity = 65,
+                    OrderType = "MARKET",
+                    Price = lastCandle.Close,
+                    StopLossPrice = sl,
+                    TargetPrice = target,
+                    Atr = atr,
+                    Rvol = rvol,
+                    Priority = 3
+                };
+            }
+            else if (currentState == "InPosition" && lastCandle.Close < latestBullishFvg.BottomPrice)
+            {
+                await _redis.DeleteKeyAsync(stateKey);
+                return new Signal
+                {
+                    StrategyName = Name,
+                    Instrument = "NIFTY",
+                    Action = "SELL",
+                    Quantity = 65,
+                    OrderType = "MARKET",
+                    Price = lastCandle.Close,
+                    Priority = 3
+                };
+            }
+
             return null;
         }
     }
