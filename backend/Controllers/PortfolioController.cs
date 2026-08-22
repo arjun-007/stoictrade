@@ -51,12 +51,39 @@ namespace StoicTrade.Api.Controllers
 
         private (decimal totalPnL, int activeCount, List<object> mockNetPositions) GetMockPaperData()
         {
+            var ist = TimeZoneHelper.GetIstTimeZone();
+            var nowIst = TimeZoneInfo.ConvertTimeFromUtc(DateTime.UtcNow, ist);
+            var todayIst = nowIst.Date;
+
+            // 1. Purge invalid test symbols
             var invalidPositions = _dbContext.PaperPositions
                 .Where(p => p.Symbol == "NIFTY" || (p.Symbol.StartsWith("NIFTY") && (p.Symbol.Contains("1300") || p.Symbol.Contains("1250") || p.Symbol.Contains("1350"))))
                 .ToList();
             if (invalidPositions.Any())
             {
                 _dbContext.PaperPositions.RemoveRange(invalidPositions);
+                try { _dbContext.SaveChanges(); } catch {}
+            }
+
+            // 2. Purge past days' closed trades (NetQty == 0 and Updated before today IST) to keep DB healthy and lightweight
+            var staleClosedPositions = _dbContext.PaperPositions
+                .AsEnumerable()
+                .Where(p => p.NetQty == 0 && TimeZoneInfo.ConvertTimeFromUtc(p.UpdatedAt, ist).Date < todayIst)
+                .ToList();
+
+            if (staleClosedPositions.Any())
+            {
+                _dbContext.PaperPositions.RemoveRange(staleClosedPositions);
+                try { _dbContext.SaveChanges(); } catch {}
+            }
+
+            // 3. Purge old TradeLogs older than 7 days
+            var staleTradeLogs = _dbContext.TradeLogs
+                .Where(t => t.Timestamp < DateTime.UtcNow.AddDays(-7))
+                .ToList();
+            if (staleTradeLogs.Any())
+            {
+                _dbContext.TradeLogs.RemoveRange(staleTradeLogs);
                 try { _dbContext.SaveChanges(); } catch {}
             }
 
@@ -74,6 +101,15 @@ namespace StoicTrade.Api.Controllers
                 string canonicalSymbol = group.Key;
                 int netQty = group.Sum(p => p.NetQty);
                 decimal realizedProfit = group.Sum(p => p.RealizedProfit);
+                var lastUpdatedIst = TimeZoneInfo.ConvertTimeFromUtc(group.Max(p => p.UpdatedAt), ist).Date;
+
+                // Only include:
+                // a) Open / Carry-forward positions (netQty != 0)
+                // b) Current day's closed trades (netQty == 0 && lastUpdatedIst == todayIst)
+                if (netQty == 0 && lastUpdatedIst < todayIst)
+                {
+                    continue; // Exclude previous days' closed trades
+                }
 
                 // Priority: individual option price cache → spot data → last trade avg
                 decimal? cachedLtp = _marketDataCache.GetOptionPrice(canonicalSymbol);
@@ -113,7 +149,8 @@ namespace StoicTrade.Api.Controllers
                     unrealized_profit = unrealized,
                     pl = realizedProfit + unrealized,
                     slNo = 1,
-                    id = group.First().Id
+                    id = group.First().Id,
+                    isCarryForward = netQty != 0 && TimeZoneInfo.ConvertTimeFromUtc(group.Min(p => p.CreatedAt), ist).Date < todayIst
                 });
 
                 totalPnL += (realizedProfit + unrealized);

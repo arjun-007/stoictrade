@@ -136,7 +136,7 @@ export default function PositionsPage() {
                 ltp: p.ltp ?? p.buyAvg ?? 0,
                 type: (p.netQty ?? 0) >= 0 ? "LONG" : "SHORT",
                 status: qty === 0 ? "EXITED" : "ACTIVE",
-                category: "DAY"
+                category: p.isCarryForward ? "HOLDING" : "DAY"
               });
             });
           }
