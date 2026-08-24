@@ -54,11 +54,13 @@ namespace StoicTrade.Api.Services
 
                 var normalisedInstrument = NormaliseSymbol(signal.Instrument);
 
-                // Resolve realistic execution price for the option
-                decimal optionLtp = optionEngine.ResolveOptionLtp(normalisedInstrument) ?? 150m;
-                decimal executionPrice = signal.ExpectedPrice > 0 && signal.ExpectedPrice < 5000
-                    ? signal.ExpectedPrice
-                    : (signal.Price > 0 && signal.Price < 5000 ? signal.Price : optionLtp);
+                // Always prioritize real-time live Market LTP at the exact moment of execution
+                decimal? currentLiveLtp = optionEngine.ResolveOptionLtp(normalisedInstrument);
+                decimal executionPrice = (currentLiveLtp.HasValue && currentLiveLtp.Value > 0)
+                    ? currentLiveLtp.Value
+                    : (signal.ExpectedPrice > 0 && signal.ExpectedPrice < 5000 
+                        ? signal.ExpectedPrice 
+                        : (signal.Price > 0 && signal.Price < 5000 ? signal.Price : 150m));
 
                 _logger.LogInformation("OrderManagementService [PAPER]: Executing mock order for {Action} {Quantity} {Instrument} at ₹{ExecutionPrice}", 
                     signal.Action, signal.Quantity, normalisedInstrument, executionPrice);

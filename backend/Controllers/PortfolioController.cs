@@ -246,5 +246,18 @@ namespace StoicTrade.Api.Controllers
             }
             return NotFound(new { error = "Could not fetch holdings from Fyers" });
         }
+
+        [HttpPost("reset-paper")]
+        public async Task<IActionResult> ResetPaperPositions()
+        {
+            var allPositions = await _dbContext.PaperPositions.ToListAsync();
+            _dbContext.PaperPositions.RemoveRange(allPositions);
+
+            var allLogs = await _dbContext.TradeLogs.ToListAsync();
+            _dbContext.TradeLogs.RemoveRange(allLogs);
+
+            await _dbContext.SaveChangesAsync();
+            return Ok(new { Message = "All paper positions and trade history have been reset." });
+        }
     }
 }

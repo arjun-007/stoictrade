@@ -1,7 +1,7 @@
 "use client";
 
-import { useState, useEffect } from "react";
-import { Briefcase, TrendingUp, TrendingDown, RefreshCcw, Filter } from "lucide-react";
+import { useState, useEffect, useCallback } from "react";
+import { Briefcase, TrendingUp, TrendingDown, RefreshCcw, Filter, Trash2 } from "lucide-react";
 import { fetchWithAuth } from "@/lib/api";
 
 type PositionStatus = "ACTIVE" | "EXITED";
@@ -80,97 +80,96 @@ export default function PositionsPage() {
   const [positionsData, setPositionsData] = useState<Position[]>([]);
   const [niftySpot, setNiftySpot] = useState<{ price: number; change?: number; changePercent?: number } | null>(null);
 
-  useEffect(() => {
-    let isRunning = false;
-
-    const fetchPositions = async () => {
-      try {
-        const statusRes = await fetchWithAuth("/api/engine/status");
-        if (statusRes.ok) {
-          const statusData = await statusRes.json();
-          isRunning = statusData.isRunning === true || statusData.IsRunning === true;
-        }
-
-        const promises: Promise<Response>[] = [
-          fetchWithAuth("/api/portfolio/positions"),
-          fetchWithAuth("/api/portfolio/holdings")
-        ];
-        if (isRunning) {
-          promises.push(fetchWithAuth("/api/marketdata/spot?symbol=NIFTY"));
-        }
-
-        const results = await Promise.all(promises);
-        const posRes = results[0];
-        const holdRes = results[1];
-        const spotRes = results.length > 2 ? results[2] : null;
-
-        if (spotRes && spotRes.ok) {
-          const spotData = await spotRes.json();
-          const p = spotData.price ?? spotData.lastPrice;
-          if (p !== undefined && p > 0) {
-            setNiftySpot({
-              price: p,
-              change: spotData.change,
-              changePercent: spotData.changePercent
-            });
-          }
-        }
-
-        let mapped: Position[] = [];
-
-        if (posRes && posRes.ok) {
-          const data = await posRes.json();
-          if (data.netPositions) {
-            data.netPositions.forEach((p: any) => {
-              const qty = Math.abs(p.netQty ?? 0);
-              // Normalise symbol: collapse old "NIFTYNIFTY…" entries stored in DB
-              const rawSymbol: string = p.symbol ?? "-";
-              const symbol = rawSymbol.startsWith("NIFTYNIFTY") ? rawSymbol.substring(5) : rawSymbol;
-              mapped.push({
-                id: mapped.length + 1,
-                symbol,
-                qty: qty,
-                buyPrice: p.buyAvg ?? 0,
-                sellPrice: p.sellAvg ?? 0,
-                // ltp comes from the backend option price cache; fall back to avg only if null
-                ltp: p.ltp ?? p.buyAvg ?? 0,
-                type: (p.netQty ?? 0) >= 0 ? "LONG" : "SHORT",
-                status: qty === 0 ? "EXITED" : "ACTIVE",
-                category: p.isCarryForward ? "HOLDING" : "DAY"
-              });
-            });
-          }
-        }
-
-        if (holdRes && holdRes.ok) {
-          const data = await holdRes.json();
-          if (data.holdings) {
-            data.holdings.forEach((h: any) => {
-              mapped.push({
-                id: mapped.length + 1,
-                symbol: h.symbol ?? "-",
-                qty: h.quantity ?? 0,
-                buyPrice: h.costPrice ?? 0,
-                sellPrice: 0,
-                ltp: h.ltp ?? h.costPrice ?? 0,
-                type: "LONG",
-                status: "ACTIVE",
-                category: "HOLDING"
-              });
-            });
-          }
-        }
-        
-        setPositionsData(mapped);
-      } catch (err) {
-        console.error("Failed to fetch positions", err);
+  const fetchPositions = useCallback(async () => {
+    try {
+      let isRunning = false;
+      const statusRes = await fetchWithAuth("/api/engine/status");
+      if (statusRes.ok) {
+        const statusData = await statusRes.json();
+        isRunning = statusData.isRunning === true || statusData.IsRunning === true;
       }
-    };
-    
+
+      const promises: Promise<Response>[] = [
+        fetchWithAuth("/api/portfolio/positions"),
+        fetchWithAuth("/api/portfolio/holdings")
+      ];
+      if (isRunning) {
+        promises.push(fetchWithAuth("/api/marketdata/spot?symbol=NIFTY"));
+      }
+
+      const results = await Promise.all(promises);
+      const posRes = results[0];
+      const holdRes = results[1];
+      const spotRes = results.length > 2 ? results[2] : null;
+
+      if (spotRes && spotRes.ok) {
+        const spotData = await spotRes.json();
+        const p = spotData.price ?? spotData.lastPrice;
+        if (p !== undefined && p > 0) {
+          setNiftySpot({
+            price: p,
+            change: spotData.change,
+            changePercent: spotData.changePercent
+          });
+        }
+      }
+
+      let mapped: Position[] = [];
+
+      if (posRes && posRes.ok) {
+        const data = await posRes.json();
+        if (data.netPositions) {
+          data.netPositions.forEach((p: any) => {
+            const qty = Math.abs(p.netQty ?? 0);
+            // Normalise symbol: collapse old "NIFTYNIFTY…" entries stored in DB
+            const rawSymbol: string = p.symbol ?? "-";
+            const symbol = rawSymbol.startsWith("NIFTYNIFTY") ? rawSymbol.substring(5) : rawSymbol;
+            mapped.push({
+              id: mapped.length + 1,
+              symbol,
+              qty: qty,
+              buyPrice: p.buyAvg ?? 0,
+              sellPrice: p.sellAvg ?? 0,
+              // ltp comes from the backend option price cache; fall back to avg only if null
+              ltp: p.ltp ?? p.buyAvg ?? 0,
+              type: (p.netQty ?? 0) >= 0 ? "LONG" : "SHORT",
+              status: qty === 0 ? "EXITED" : "ACTIVE",
+              category: p.isCarryForward ? "HOLDING" : "DAY"
+            });
+          });
+        }
+      }
+
+      if (holdRes && holdRes.ok) {
+        const data = await holdRes.json();
+        if (data.holdings) {
+          data.holdings.forEach((h: any) => {
+            mapped.push({
+              id: mapped.length + 1,
+              symbol: h.symbol ?? "-",
+              qty: h.quantity ?? 0,
+              buyPrice: h.costPrice ?? 0,
+              sellPrice: 0,
+              ltp: h.ltp ?? h.costPrice ?? 0,
+              type: "LONG",
+              status: "ACTIVE",
+              category: "HOLDING"
+            });
+          });
+        }
+      }
+
+      setPositionsData(mapped);
+    } catch (err) {
+      console.error("Failed to fetch positions", err);
+    }
+  }, []);
+
+  useEffect(() => {
     fetchPositions();
     const interval = setInterval(fetchPositions, 8000);
     return () => clearInterval(interval);
-  }, []);
+  }, [fetchPositions]);
 
   const filteredData = positionsData.filter(item => {
     if (item.category !== activeTab) return false;
@@ -230,8 +229,31 @@ export default function PositionsPage() {
               ₹ {totalPnL.toFixed(2)}
             </p>
           </div>
-          <button className="p-3 bg-surface border border-slate-200 dark:border-slate-700 rounded-xl hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors shadow-sm">
+          <button 
+            onClick={fetchPositions}
+            title="Refresh positions"
+            className="p-3 bg-surface border border-slate-200 dark:border-slate-700 rounded-xl hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors shadow-sm"
+          >
             <RefreshCcw className="w-5 h-5 text-slate-600 dark:text-slate-400" />
+          </button>
+          <button
+            onClick={async () => {
+              if (!confirm("Are you sure you want to clear all paper trading positions and trade logs?")) return;
+              try {
+                const res = await fetchWithAuth("/api/portfolio/reset-paper", { method: "POST" });
+                if (res.ok) {
+                  setPositionsData([]);
+                  alert("Paper trades reset successfully.");
+                }
+              } catch (e) {
+                console.error(e);
+              }
+            }}
+            title="Reset Paper Positions"
+            className="flex items-center gap-1.5 px-3.5 py-2.5 bg-red-500/10 text-red-600 hover:bg-red-500 hover:text-white dark:bg-red-500/20 dark:text-red-400 rounded-xl font-bold transition-all text-xs shadow-sm"
+          >
+            <Trash2 className="w-4 h-4" />
+            <span>Reset Trades</span>
           </button>
         </div>
       </header>
