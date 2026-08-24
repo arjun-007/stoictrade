@@ -139,9 +139,30 @@ using (var scope = app.Services.CreateScope())
                 TotalSellQty INTEGER NOT NULL,
                 TotalBuyValue TEXT NOT NULL,
                 TotalSellValue TEXT NOT NULL,
+                TargetPrice TEXT,
+                StopLossPrice TEXT,
+                StrategyName TEXT,
                 CreatedAt TEXT NOT NULL,
                 UpdatedAt TEXT NOT NULL
             )");
+    }
+    catch {}
+
+    try
+    {
+        dbContext.Database.ExecuteSqlRaw("ALTER TABLE PaperPositions ADD COLUMN TargetPrice TEXT");
+    }
+    catch {}
+
+    try
+    {
+        dbContext.Database.ExecuteSqlRaw("ALTER TABLE PaperPositions ADD COLUMN StopLossPrice TEXT");
+    }
+    catch {}
+
+    try
+    {
+        dbContext.Database.ExecuteSqlRaw("ALTER TABLE PaperPositions ADD COLUMN StrategyName TEXT");
     }
     catch {}
 
