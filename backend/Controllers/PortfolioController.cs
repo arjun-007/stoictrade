@@ -1,5 +1,6 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
 using StoicTrade.Api.Services;
 using StoicTrade.Api.Data;
 using StoicTrade.Api.Services.MarketData;

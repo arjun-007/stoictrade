@@ -62,8 +62,8 @@ namespace StoicTrade.Api.Services.Strategies
 
                     // Select the requested expiry (e.g. expiryIndex = 1 for 2nd expiry / next week)
                     string chosenExpiry = (expiryIndex >= 0 && expiryIndex < distinctExpiries.Count)
-                        ? distinctExpiries[expiryIndex]
-                        : distinctExpiries.First();
+                        ? (distinctExpiries[expiryIndex] ?? distinctExpiries.First() ?? "")
+                        : (distinctExpiries.First() ?? "");
 
                     return $"NSE:{underlyingSymbol}{chosenExpiry}{targetStrike}{optionType}";
                 }
