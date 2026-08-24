@@ -30,15 +30,16 @@ namespace StoicTrade.Api.Controllers
         [HttpPost("start")]
         public IActionResult StartEngine()
         {
-            var globalSettings = _dbContext.GlobalSettings.FirstOrDefault();
-            if (globalSettings != null && globalSettings.TradeMode == "Paper")
+            // If already authenticated with Fyers, start engine directly
+            if (!string.IsNullOrEmpty(_fyersApi.GetAccessToken()))
             {
                 _fyersApi.StartPaperEngine();
-                return Ok(new { Message = "Paper Trading Engine started successfully.", IsRunning = true });
+                return Ok(new { Message = "Engine started successfully with live broker market data.", IsRunning = true });
             }
 
+            // If no active Fyers token, redirect to Fyers OAuth to fetch real live broker quotes
             var authUrl = _fyersApi.GetAuthUrl();
-            return Ok(new { Message = "Please authenticate with Fyers to start the engine.", AuthUrl = authUrl });
+            return Ok(new { Message = "Please authenticate with Fyers to connect live market data.", AuthUrl = authUrl });
         }
 
         [HttpPost("callback")]
