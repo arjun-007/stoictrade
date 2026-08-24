@@ -83,16 +83,21 @@ namespace StoicTrade.Api.Services.Strategies
                         }
                     }
 
-                    // 2. Daily 3:40 PM IST Auto-Stop Engine
-                    if (nowIst >= autoStopCutoff || nowIst < marketOpen)
+                    using var scope = _serviceProvider.CreateScope();
+                    var dbContext = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+                    var globalSettings = dbContext.GlobalSettings.FirstOrDefault();
+                    string tradeMode = globalSettings?.TradeMode ?? "Paper";
+
+                    // 2. Daily 3:40 PM IST Auto-Stop Engine (Live mode only)
+                    if (tradeMode == "Live" && (nowIst >= autoStopCutoff || nowIst < marketOpen))
                     {
                         if (_fyersApi.IsEngineRunning)
                         {
-                            _logger.LogInformation("Daily 3:40 PM IST market cutoff reached. Automatically stopping Strategy Engine and disconnecting broker session.");
+                            _logger.LogInformation("Daily 3:40 PM IST market cutoff reached in Live mode. Automatically stopping Strategy Engine and disconnecting broker session.");
                             _fyersApi.Disconnect();
                         }
 
-                        // Off-market hours: sleep with 10s delay to eliminate CPU and hosting costs
+                        // Off-market hours in Live mode: sleep with 10s delay to eliminate CPU and hosting costs
                         await Task.Delay(10000, stoppingToken);
                         continue;
                     }
@@ -104,31 +109,15 @@ namespace StoicTrade.Api.Services.Strategies
                         continue;
                     }
 
-                    using var scope = _serviceProvider.CreateScope();
-                    var dbContext = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-
                     // 4. Fetch enabled strategies and strategy groups from DB
                     var activeConfigs = dbContext.StrategyConfigs.Where(s => s.IsEnabled).ToList();
                     var activeGroups = dbContext.StrategyGroups.Where(g => g.IsEnabled).ToList();
 
                     // 5. Fetch market data based on TradeMode
-                    var globalSettings = dbContext.GlobalSettings.FirstOrDefault();
-                    string marketDataJson = "{\"symbol\": \"NIFTY\", \"price\": 22000}"; // Default fallback
-
-                    if (globalSettings != null && globalSettings.TradeMode == "Paper")
-                    {
-                        var marketCache = scope.ServiceProvider.GetRequiredService<StoicTrade.Api.Services.MarketData.MarketDataCache>();
-                        var spot = marketCache.GetSpotData("NIFTY");
-                        if (spot != null)
-                        {
-                            marketDataJson = $"{{\"symbol\": \"NIFTY\", \"price\": {spot.Price}}}";
-                        }
-                    }
-                    else
-                    {
-                        // In reality this comes from Fyers WebSocket for Live trading
-                        // marketDataJson = GetFromFyers()
-                    }
+                    var marketCache = scope.ServiceProvider.GetRequiredService<StoicTrade.Api.Services.MarketData.MarketDataCache>();
+                    var spot = marketCache.GetSpotData("NIFTY");
+                    decimal currentPrice = (spot != null && spot.Price > 0) ? spot.Price : 24250.0m;
+                    string marketDataJson = $"{{\"symbol\": \"NIFTY\", \"price\": {currentPrice}}}";
 
                     // 6. Evaluate each active standalone strategy
                     var tickSignals = new List<Signal>();

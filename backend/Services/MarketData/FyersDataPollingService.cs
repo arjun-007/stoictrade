@@ -21,22 +21,30 @@ namespace StoicTrade.Api.Services.MarketData
         private readonly MarketDataAggregatorService _aggregator;
         private bool _isAggregatorInitialized = false;
 
+        private readonly Microsoft.Extensions.Configuration.IConfiguration _config;
+        private readonly IServiceProvider _serviceProvider;
+        private readonly OptionChainAnalysisService _optionChainService;
+        private decimal _simulatedNiftyPrice = 24250.0m;
+        private readonly Random _random = new Random();
+
         public FyersDataPollingService(
             ILogger<FyersDataPollingService> logger,
             MarketDataCache cache,
             FyersApiService fyersApi,
             MarketDataAggregatorService aggregator,
-            Microsoft.Extensions.Configuration.IConfiguration config)
+            Microsoft.Extensions.Configuration.IConfiguration config,
+            IServiceProvider serviceProvider,
+            OptionChainAnalysisService optionChainService)
         {
             _logger = logger;
             _cache = cache;
             _fyersApi = fyersApi;
             _aggregator = aggregator;
-            _httpClient = new HttpClient();
             _config = config;
+            _serviceProvider = serviceProvider;
+            _optionChainService = optionChainService;
+            _httpClient = new HttpClient();
         }
-
-        private readonly Microsoft.Extensions.Configuration.IConfiguration _config;
 
         protected override async Task ExecuteAsync(CancellationToken stoppingToken)
         {
@@ -49,147 +57,53 @@ namespace StoicTrade.Api.Services.MarketData
             {
                 try
                 {
-                    // 1. If engine is stopped, DO NOT poll external APIs to reduce hosting and network costs
+                    // 1. If engine is stopped, DO NOT poll or generate ticks
                     if (!_fyersApi.IsEngineRunning)
                     {
                         await Task.Delay(5000, stoppingToken);
                         continue;
                     }
 
+                    // Check TradeMode from DB
+                    string tradeMode = "Paper";
+                    try
+                    {
+                        using var scope = _serviceProvider.CreateScope();
+                        var dbContext = scope.ServiceProvider.GetRequiredService<StoicTrade.Api.Data.AppDbContext>();
+                        var globalSettings = dbContext.GlobalSettings.FirstOrDefault();
+                        if (globalSettings != null && !string.IsNullOrEmpty(globalSettings.TradeMode))
+                        {
+                            tradeMode = globalSettings.TradeMode;
+                        }
+                    }
+                    catch { /* Fallback to Paper mode */ }
+
                     // 2. Off-market check (>= 3:40 PM or < 9:15 AM IST)
                     var ist = StoicTrade.Api.Services.TimeZoneHelper.GetIstTimeZone();
                     var nowIst = TimeZoneInfo.ConvertTimeFromUtc(DateTime.UtcNow, ist).TimeOfDay;
                     var autoStopCutoff = new TimeSpan(15, 40, 0); // 3:40 PM IST
                     var marketOpen = new TimeSpan(9, 15, 0);      // 9:15 AM IST
+                    bool isMarketHours = (nowIst < autoStopCutoff && nowIst >= marketOpen);
 
-                    if (nowIst >= autoStopCutoff || nowIst < marketOpen)
+                    if (tradeMode == "Live" && !isMarketHours)
                     {
-                        _logger.LogInformation("Fyers Poller: Off-market hours (>= 3:40 PM or < 9:15 AM IST). Disconnecting engine.");
+                        _logger.LogInformation("Fyers Poller: Off-market hours in Live mode (>= 3:40 PM or < 9:15 AM IST). Disconnecting engine.");
                         _fyersApi.Disconnect();
                         await Task.Delay(10000, stoppingToken);
                         continue;
                     }
 
-                    // 3. Ensure we have a valid token
                     var token = _fyersApi.GetAccessToken();
-                    if (string.IsNullOrEmpty(token))
+
+                    // If Live mode, or Paper mode with a valid token during market hours: poll live Fyers REST API
+                    if (isMarketHours && !string.IsNullOrEmpty(token))
                     {
-                        await Task.Delay(5000, stoppingToken);
-                        continue;
+                        await PollLiveFyersDataAsync(token, stoppingToken);
                     }
-
-                    _httpClient.DefaultRequestHeaders.Clear();
-                    _httpClient.DefaultRequestHeaders.TryAddWithoutValidation("Authorization", $"{_config["FYERS_APP_ID"]}:{token}");
-
-                    // 2. Query spot prices for all TrackedSymbols
-                    var trackedSymbols = _config.GetSection("TrackedSymbols").Get<string[]>() ?? new[] { "NSE:NIFTY50-INDEX" };
-                    var spotQuery = string.Join(",", trackedSymbols);
-                    var spotRes = await _httpClient.GetAsync($"https://api-t1.fyers.in/data/quotes?symbols={spotQuery}", stoppingToken);
-                    if (!spotRes.IsSuccessStatusCode)
+                    else
                     {
-                        await Task.Delay(3000, stoppingToken);
-                        continue;
-                    }
-
-                    var spotJson = await spotRes.Content.ReadAsStringAsync(stoppingToken);
-                    var spotDoc = JsonDocument.Parse(spotJson);
-                    
-                    decimal niftySpotPrice = 0;
-                    try
-                    {
-                        var dataArray = spotDoc.RootElement.GetProperty("d");
-                        foreach (var item in dataArray.EnumerateArray())
-                        {
-                            var v = item.GetProperty("v");
-                            var lp = v.GetProperty("lp").GetDecimal();
-                            decimal prevClose = v.TryGetProperty("prev_close_price", out var pcProp) ? pcProp.GetDecimal() : 0m;
-                            decimal ch = v.TryGetProperty("ch", out var chProp) ? chProp.GetDecimal() : (prevClose > 0 ? lp - prevClose : 0m);
-                            decimal chp = v.TryGetProperty("chp", out var chpProp) ? chpProp.GetDecimal() : (prevClose > 0 ? ((lp - prevClose) / prevClose) * 100m : 0m);
-                            string queryName = item.TryGetProperty("n", out var nProp) ? nProp.GetString() ?? "" : "";
-                            string sym = v.TryGetProperty("symbol", out var sProp) ? sProp.GetString() ?? "" : "";
-                            string shortName = v.TryGetProperty("short_name", out var snProp) ? snProp.GetString() ?? "" : "";
-                            string rawName = !string.IsNullOrEmpty(queryName) ? queryName : (!string.IsNullOrEmpty(sym) ? sym : shortName);
-                            var volume = v.TryGetProperty("volume", out var vol) ? vol.GetDecimal() : 0m;
-                            
-                            if (rawName.Contains("NIFTY", StringComparison.OrdinalIgnoreCase))
-                            {
-                                niftySpotPrice = lp;
-                                _cache.UpdateSpotData("NIFTY", lp, DateTime.UtcNow, prevClose, ch, chp);
-                                _cache.UpdateSpotData("NIFTY50-INDEX", lp, DateTime.UtcNow, prevClose, ch, chp);
-                                if (!_isAggregatorInitialized)
-                                {
-                                    await _aggregator.InitializeSymbolAsync("NSE:NIFTY50-INDEX", new[] { 1, 5, 15 }, niftySpotPrice);
-                                    _isAggregatorInitialized = true;
-                                }
-                                _aggregator.UpdateTick("NSE:NIFTY50-INDEX", niftySpotPrice, volume);
-                            }
-                            else
-                            {
-                                string cleanKey = rawName.Replace("NSE:", "").Replace("-EQ", "").Trim();
-                                _cache.UpdateSpotData(cleanKey, lp, DateTime.UtcNow, prevClose, ch, chp);
-                            }
-                        }
-                    }
-                    catch { /* Handle unexpected JSON safely */ }
-
-                    if (niftySpotPrice == 0)
-                    {
-                        await Task.Delay(2000, stoppingToken);
-                        continue;
-                    }
-
-                    // 3. Generate Option Symbols across all expiries in batches of ≤48 symbols
-                    int atmStrike = (int)Math.Round(niftySpotPrice / 50.0m) * 50;
-                    var expiries = GetUpcomingExpiries();
-
-                    // Batch: 8 strikes each side (17 strikes × 2 = 34 sym) per expiry → 1 expiry per batch (34 sym)
-                    // Safely under Fyers 50-symbol limit and ensures one unlisted expiry does not fail others.
-                    const int StrikesEachSide = 8;
-                    const int ExpiryBatchSize = 1;
-                    var allOptionDocs = new List<JsonDocument>();
-
-                    for (int batchStart = 0; batchStart < expiries.Count; batchStart += ExpiryBatchSize)
-                    {
-                        var batchExpiries = expiries.Skip(batchStart).Take(ExpiryBatchSize).ToList();
-                        var batchSymbols = new List<string>();
-
-                        foreach (var expiry in batchExpiries)
-                        {
-                            for (int i = -StrikesEachSide; i <= StrikesEachSide; i++)
-                            {
-                                int strike = atmStrike + (i * 50);
-                                batchSymbols.Add($"NSE:NIFTY{expiry}{strike}CE");
-                                batchSymbols.Add($"NSE:NIFTY{expiry}{strike}PE");
-                            }
-                        }
-
-                        var batchQuery = string.Join(",", batchSymbols);
-                        try
-                        {
-                            var batchRes = await _httpClient.GetAsync($"https://api-t1.fyers.in/data/quotes?symbols={batchQuery}", stoppingToken);
-                            if (batchRes.IsSuccessStatusCode)
-                            {
-                                var batchJson = await batchRes.Content.ReadAsStringAsync(stoppingToken);
-                                allOptionDocs.Add(JsonDocument.Parse(batchJson));
-                            }
-                        }
-                        catch { /* skip failed batch */ }
-
-                        // Small delay between batches to avoid rate limiting
-                        if (batchStart + ExpiryBatchSize < expiries.Count)
-                            await Task.Delay(100, stoppingToken);
-                    }
-
-                    if (allOptionDocs.Count > 0)
-                    {
-                        // Merge all batch docs and update cache
-                        var mappedJson = MapFyersToNseFormatMulti(allOptionDocs, niftySpotPrice);
-                        _cache.UpdateOptionChainData("NIFTY", mappedJson);
-
-                        foreach (var doc in allOptionDocs)
-                            CacheIndividualOptionPrices(doc);
-
-                        _logger.LogDebug($"Fyers Poller: Updated {allOptionDocs.Count} batches, {expiries.Count} expiries around {atmStrike}");
+                        // In Paper mode or off-market hours without live token: generate realistic simulated market data
+                        await GeneratePaperMarketDataAsync(stoppingToken);
                     }
                 }
                 catch (Exception ex)
@@ -202,6 +116,195 @@ namespace StoicTrade.Api.Services.MarketData
             }
 
             _logger.LogInformation("Fyers Data Polling Service is stopping.");
+        }
+
+        private async Task PollLiveFyersDataAsync(string token, CancellationToken stoppingToken)
+        {
+            _httpClient.DefaultRequestHeaders.Clear();
+            _httpClient.DefaultRequestHeaders.TryAddWithoutValidation("Authorization", $"{_config["FYERS_APP_ID"]}:{token}");
+
+            // 1. Query spot prices for all TrackedSymbols
+            var trackedSymbols = _config.GetSection("TrackedSymbols").Get<string[]>() ?? new[] { "NSE:NIFTY50-INDEX" };
+            var spotQuery = string.Join(",", trackedSymbols);
+            var spotRes = await _httpClient.GetAsync($"https://api-t1.fyers.in/data/quotes?symbols={spotQuery}", stoppingToken);
+            if (!spotRes.IsSuccessStatusCode)
+            {
+                // Fall back to paper generation if Fyers API fails
+                await GeneratePaperMarketDataAsync(stoppingToken);
+                return;
+            }
+
+            var spotJson = await spotRes.Content.ReadAsStringAsync(stoppingToken);
+            var spotDoc = JsonDocument.Parse(spotJson);
+
+            decimal niftySpotPrice = 0;
+            try
+            {
+                var dataArray = spotDoc.RootElement.GetProperty("d");
+                foreach (var item in dataArray.EnumerateArray())
+                {
+                    var v = item.GetProperty("v");
+                    var lp = v.GetProperty("lp").GetDecimal();
+                    decimal prevClose = v.TryGetProperty("prev_close_price", out var pcProp) ? pcProp.GetDecimal() : 0m;
+                    decimal ch = v.TryGetProperty("ch", out var chProp) ? chProp.GetDecimal() : (prevClose > 0 ? lp - prevClose : 0m);
+                    decimal chp = v.TryGetProperty("chp", out var chpProp) ? chpProp.GetDecimal() : (prevClose > 0 ? ((lp - prevClose) / prevClose) * 100m : 0m);
+                    string queryName = item.TryGetProperty("n", out var nProp) ? nProp.GetString() ?? "" : "";
+                    string sym = v.TryGetProperty("symbol", out var sProp) ? sProp.GetString() ?? "" : "";
+                    string shortName = v.TryGetProperty("short_name", out var snProp) ? snProp.GetString() ?? "" : "";
+                    string rawName = !string.IsNullOrEmpty(queryName) ? queryName : (!string.IsNullOrEmpty(sym) ? sym : shortName);
+                    var volume = v.TryGetProperty("volume", out var vol) ? vol.GetDecimal() : 0m;
+
+                    if (rawName.Contains("NIFTY", StringComparison.OrdinalIgnoreCase))
+                    {
+                        niftySpotPrice = lp;
+                        _simulatedNiftyPrice = lp;
+                        _cache.UpdateSpotData("NIFTY", lp, DateTime.UtcNow, prevClose, ch, chp);
+                        _cache.UpdateSpotData("NIFTY50-INDEX", lp, DateTime.UtcNow, prevClose, ch, chp);
+                        if (!_isAggregatorInitialized)
+                        {
+                            await _aggregator.InitializeSymbolAsync("NSE:NIFTY50-INDEX", new[] { 1, 5, 15 }, niftySpotPrice);
+                            _isAggregatorInitialized = true;
+                        }
+                        _aggregator.UpdateTick("NSE:NIFTY50-INDEX", niftySpotPrice, volume);
+                    }
+                    else
+                    {
+                        string cleanKey = rawName.Replace("NSE:", "").Replace("-EQ", "").Trim();
+                        _cache.UpdateSpotData(cleanKey, lp, DateTime.UtcNow, prevClose, ch, chp);
+                    }
+                }
+            }
+            catch { /* Handle unexpected JSON safely */ }
+
+            if (niftySpotPrice == 0)
+            {
+                await GeneratePaperMarketDataAsync(stoppingToken);
+                return;
+            }
+
+            // 2. Generate Option Symbols across all expiries in batches
+            int atmStrike = (int)Math.Round(niftySpotPrice / 50.0m) * 50;
+            var expiries = GetUpcomingExpiries();
+
+            const int StrikesEachSide = 8;
+            const int ExpiryBatchSize = 1;
+            var allOptionDocs = new List<JsonDocument>();
+
+            for (int batchStart = 0; batchStart < expiries.Count; batchStart += ExpiryBatchSize)
+            {
+                var batchExpiries = expiries.Skip(batchStart).Take(ExpiryBatchSize).ToList();
+                var batchSymbols = new List<string>();
+
+                foreach (var expiry in batchExpiries)
+                {
+                    for (int i = -StrikesEachSide; i <= StrikesEachSide; i++)
+                    {
+                        int strike = atmStrike + (i * 50);
+                        batchSymbols.Add($"NSE:NIFTY{expiry}{strike}CE");
+                        batchSymbols.Add($"NSE:NIFTY{expiry}{strike}PE");
+                    }
+                }
+
+                var batchQuery = string.Join(",", batchSymbols);
+                try
+                {
+                    var batchRes = await _httpClient.GetAsync($"https://api-t1.fyers.in/data/quotes?symbols={batchQuery}", stoppingToken);
+                    if (batchRes.IsSuccessStatusCode)
+                    {
+                        var batchJson = await batchRes.Content.ReadAsStringAsync(stoppingToken);
+                        allOptionDocs.Add(JsonDocument.Parse(batchJson));
+                    }
+                }
+                catch { /* skip failed batch */ }
+
+                if (batchStart + ExpiryBatchSize < expiries.Count)
+                    await Task.Delay(100, stoppingToken);
+            }
+
+            if (allOptionDocs.Count > 0)
+            {
+                var mappedJson = MapFyersToNseFormatMulti(allOptionDocs, niftySpotPrice);
+                _cache.UpdateOptionChainData("NIFTY", mappedJson);
+
+                foreach (var doc in allOptionDocs)
+                    CacheIndividualOptionPrices(doc);
+            }
+        }
+
+        private async Task GeneratePaperMarketDataAsync(CancellationToken stoppingToken)
+        {
+            // Realistic random micro-walk for NIFTY spot (-2.5 to +2.5 pts)
+            double tickDelta = (_random.NextDouble() * 5.0) - 2.45;
+            _simulatedNiftyPrice = Math.Round(Math.Max(23000m, Math.Min(26000m, _simulatedNiftyPrice + (decimal)tickDelta)), 2);
+
+            decimal prevClose = 24180.0m;
+            decimal change = _simulatedNiftyPrice - prevClose;
+            decimal changePercent = Math.Round((change / prevClose) * 100m, 2);
+
+            _cache.UpdateSpotData("NIFTY", _simulatedNiftyPrice, DateTime.UtcNow, prevClose, change, changePercent);
+            _cache.UpdateSpotData("NIFTY50-INDEX", _simulatedNiftyPrice, DateTime.UtcNow, prevClose, change, changePercent);
+            _cache.UpdateSpotData("HDFCBANK", 1645.50m + (decimal)((_random.NextDouble() * 2) - 1), DateTime.UtcNow, 1640m);
+            _cache.UpdateSpotData("RELIANCE", 2985.20m + (decimal)((_random.NextDouble() * 3) - 1.5), DateTime.UtcNow, 2975m);
+
+            if (!_isAggregatorInitialized)
+            {
+                await _aggregator.InitializeSymbolAsync("NSE:NIFTY50-INDEX", new[] { 1, 5, 15 }, _simulatedNiftyPrice);
+                _isAggregatorInitialized = true;
+            }
+
+            decimal tickVol = _random.Next(2000, 12000);
+            _aggregator.UpdateTick("NSE:NIFTY50-INDEX", _simulatedNiftyPrice, tickVol);
+
+            // Generate full synthetic option chain
+            int atmStrike = (int)Math.Round(_simulatedNiftyPrice / 50.0m) * 50;
+            var expiries = GetUpcomingExpiries();
+            var strikesMap = new Dictionary<string, Dictionary<int, Dictionary<string, object>>>();
+
+            const int StrikesEachSide = 15; // ATM ± 15 strikes (31 strikes total across expiries)
+
+            for (int eIdx = 0; eIdx < expiries.Count; eIdx++)
+            {
+                var expiry = expiries[eIdx];
+                if (!strikesMap.ContainsKey(expiry))
+                    strikesMap[expiry] = new Dictionary<int, Dictionary<string, object>>();
+
+                // Time value base increases with further expiries
+                decimal timeValueAtm = 120m + (eIdx * 65m);
+
+                for (int i = -StrikesEachSide; i <= StrikesEachSide; i++)
+                {
+                    int strike = atmStrike + (i * 50);
+                    strikesMap[expiry][strike] = new Dictionary<string, object>();
+
+                    // CE Pricing
+                    decimal ceIntrinsic = Math.Max(0m, _simulatedNiftyPrice - strike);
+                    decimal ceOtmDist = Math.Max(0m, strike - _simulatedNiftyPrice);
+                    decimal ceExtrinsic = Math.Max(1.5m, timeValueAtm * (decimal)Math.Exp((double)(-ceOtmDist / 450m)));
+                    decimal ceLtp = Math.Round(ceIntrinsic + ceExtrinsic, 2);
+                    decimal ceChange = Math.Round(change * 0.45m, 2);
+
+                    strikesMap[expiry][strike]["CE"] = new { lastPrice = ceLtp, change = ceChange };
+                    _cache.UpdateOptionPrice($"NIFTY{expiry}{strike}CE", ceLtp);
+
+                    // PE Pricing
+                    decimal peIntrinsic = Math.Max(0m, strike - _simulatedNiftyPrice);
+                    decimal peOtmDist = Math.Max(0m, _simulatedNiftyPrice - strike);
+                    decimal peExtrinsic = Math.Max(1.5m, timeValueAtm * (decimal)Math.Exp((double)(-peOtmDist / 450m)));
+                    decimal peLtp = Math.Round(peIntrinsic + peExtrinsic, 2);
+                    decimal peChange = Math.Round(-change * 0.45m, 2);
+
+                    strikesMap[expiry][strike]["PE"] = new { lastPrice = peLtp, change = peChange };
+                    _cache.UpdateOptionPrice($"NIFTY{expiry}{strike}PE", peLtp);
+
+                    // Feed option chain analysis metrics
+                    decimal callOi = Math.Max(50000, 2500000 - (Math.Abs(strike - atmStrike) * 3500));
+                    decimal putOi = Math.Max(50000, 2800000 - (Math.Abs(strike - atmStrike) * 3500));
+                    _optionChainService.UpdateStrike("NIFTY", strike, callOi, putOi, ceLtp, peLtp);
+                }
+            }
+
+            var mappedJson = SerialiseStrikesMap(strikesMap, _simulatedNiftyPrice);
+            _cache.UpdateOptionChainData("NIFTY", mappedJson);
         }
 
         /// <summary>
