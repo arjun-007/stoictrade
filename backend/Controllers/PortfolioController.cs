@@ -227,18 +227,25 @@ namespace StoicTrade.Api.Controllers
         [HttpGet("positions")]
         public async Task<IActionResult> GetPositions()
         {
-            if (IsPaperMode())
+            try
             {
-                var mockData = GetMockPaperData();
-                return Ok(new { netPositions = mockData.mockNetPositions });
-            }
+                if (IsPaperMode())
+                {
+                    var mockData = GetMockPaperData();
+                    return Ok(new { netPositions = mockData.mockNetPositions });
+                }
 
-            var positions = await _fyersApi.GetPositionsAsync();
-            if (positions.ValueKind != JsonValueKind.Undefined)
-            {
-                return Ok(positions);
+                var positions = await _fyersApi.GetPositionsAsync();
+                if (positions.ValueKind != JsonValueKind.Undefined)
+                {
+                    return Ok(positions);
+                }
+                return Ok(new { netPositions = new List<object>() });
             }
-            return NotFound(new { error = "Could not fetch positions from Fyers" });
+            catch (Exception ex)
+            {
+                return Ok(new { netPositions = new List<object>(), error = ex.Message });
+            }
         }
 
         [HttpGet("holdings")]
