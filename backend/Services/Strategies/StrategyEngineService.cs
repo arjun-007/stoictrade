@@ -143,6 +143,9 @@ namespace StoicTrade.Api.Services.Strategies
                                         var optLtp = optionEngine.ResolveOptionLtp(optSymbol);
                                         signal.Price = (optLtp.HasValue && optLtp.Value > 0) ? optLtp.Value : 150m;
                                         signal.ExpectedPrice = signal.Price;
+                                        // For option buyers: whether the index was Bullish (Buy CE) or Bearish (Buy PE),
+                                        // the order action on the option contract is ALWAYS "BUY"
+                                        signal.Action = "BUY";
                                     }
                                 }
 
@@ -241,6 +244,8 @@ namespace StoicTrade.Api.Services.Strategies
                                 var optLtp = optionEngine.ResolveOptionLtp(optSymbol);
                                 groupSignal.Price = (optLtp.HasValue && optLtp.Value > 0) ? optLtp.Value : 150m;
                                 groupSignal.ExpectedPrice = groupSignal.Price;
+                                // For option buyers: option contract order action is always "BUY"
+                                groupSignal.Action = "BUY";
                             }
 
                             tickSignals.Add(groupSignal);
