@@ -22,6 +22,8 @@ namespace StoicTrade.Api.Services.Strategies
         public string Action { get; set; } = string.Empty;   // BUY | SELL
         public string Instrument { get; set; } = string.Empty;
         public decimal Price { get; set; }
+        public decimal TargetPrice { get; set; }
+        public decimal StopLossPrice { get; set; }
         public int Quantity { get; set; }
         /// <summary>AutoExecuted | AwaitingApproval | SignalOnly | Blocked</summary>
         public string Status { get; set; } = string.Empty;
@@ -146,6 +148,15 @@ namespace StoicTrade.Api.Services.Strategies
                                         // For option buyers: whether the index was Bullish (Buy CE) or Bearish (Buy PE),
                                         // the order action on the option contract is ALWAYS "BUY"
                                         signal.Action = "BUY";
+
+                                        // Set Option Target and Stop Loss prices (~1:2 R:R)
+                                        decimal targetGainPts = (decimal)config.PerTradeGainPoint;
+                                        decimal slLossPts = (decimal)config.PerTradeStopLossPoint;
+                                        decimal optionTargetDelta = targetGainPts > 0 ? (targetGainPts * 0.55m) : (signal.Price * 0.25m);
+                                        decimal optionSlDelta = slLossPts > 0 ? (slLossPts * 0.55m) : (signal.Price * 0.15m);
+
+                                        signal.TargetPrice = Math.Round(signal.Price + optionTargetDelta, 2);
+                                        signal.StopLossPrice = Math.Round(Math.Max(5.0m, signal.Price - optionSlDelta), 2);
                                     }
                                 }
 
@@ -164,6 +175,8 @@ namespace StoicTrade.Api.Services.Strategies
                                     Action = signal.Action,
                                     Instrument = signal.Instrument,
                                     Price = signal.Price,
+                                    TargetPrice = signal.TargetPrice,
+                                    StopLossPrice = signal.StopLossPrice,
                                     Quantity = signal.Quantity,
                                     Status = logStatus,
                                     GeneratedAt = DateTime.UtcNow
@@ -246,6 +259,14 @@ namespace StoicTrade.Api.Services.Strategies
                                 groupSignal.ExpectedPrice = groupSignal.Price;
                                 // For option buyers: option contract order action is always "BUY"
                                 groupSignal.Action = "BUY";
+
+                                decimal targetGainPts = group.PerTradeGainPoint;
+                                decimal slLossPts = group.PerTradeStopLossPoint;
+                                decimal optionTargetDelta = targetGainPts > 0 ? (targetGainPts * 0.55m) : (groupSignal.Price * 0.25m);
+                                decimal optionSlDelta = slLossPts > 0 ? (slLossPts * 0.55m) : (groupSignal.Price * 0.15m);
+
+                                groupSignal.TargetPrice = Math.Round(groupSignal.Price + optionTargetDelta, 2);
+                                groupSignal.StopLossPrice = Math.Round(Math.Max(5.0m, groupSignal.Price - optionSlDelta), 2);
                             }
 
                             tickSignals.Add(groupSignal);
@@ -263,6 +284,8 @@ namespace StoicTrade.Api.Services.Strategies
                                 Action = groupSignal.Action,
                                 Instrument = groupSignal.Instrument,
                                 Price = groupSignal.Price,
+                                TargetPrice = groupSignal.TargetPrice,
+                                StopLossPrice = groupSignal.StopLossPrice,
                                 Quantity = groupSignal.Quantity,
                                 Status = logStatus,
                                 GeneratedAt = DateTime.UtcNow

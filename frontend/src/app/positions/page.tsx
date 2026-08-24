@@ -14,6 +14,9 @@ interface Position {
   qty: number;
   buyPrice: number;
   sellPrice?: number;
+  targetPrice?: number;
+  stopLossPrice?: number;
+  strategyName?: string;
   ltp: number;
   type: PositionType;
   status: PositionStatus;
@@ -124,12 +127,19 @@ export default function PositionsPage() {
             // Normalise symbol: collapse old "NIFTYNIFTY…" entries stored in DB
             const rawSymbol: string = p.symbol ?? "-";
             const symbol = rawSymbol.startsWith("NIFTYNIFTY") ? rawSymbol.substring(5) : rawSymbol;
+            const buyAvg = p.buyAvg ?? 0;
+            const tgt = p.targetPrice && p.targetPrice > 0 ? p.targetPrice : (buyAvg > 0 ? buyAvg * 1.25 : undefined);
+            const sl = p.stopLossPrice && p.stopLossPrice > 0 ? p.stopLossPrice : (buyAvg > 0 ? Math.max(5, buyAvg * 0.85) : undefined);
+
             mapped.push({
               id: mapped.length + 1,
               symbol,
               qty: qty,
-              buyPrice: p.buyAvg ?? 0,
+              buyPrice: buyAvg,
               sellPrice: p.sellAvg ?? 0,
+              targetPrice: tgt,
+              stopLossPrice: sl,
+              strategyName: p.strategyName ?? "Strategy",
               // ltp comes from the backend option price cache; fall back to avg only if null
               ltp: p.ltp ?? p.buyAvg ?? 0,
               type: (p.netQty ?? 0) >= 0 ? "LONG" : "SHORT",
@@ -299,11 +309,13 @@ export default function PositionsPage() {
           <table className="w-full text-left border-collapse">
             <thead>
               <tr className="bg-slate-50 dark:bg-slate-800/50 text-slate-500 text-sm font-semibold tracking-wide uppercase border-b border-slate-200 dark:border-slate-800">
-                <th className="p-4">Instrument</th>
+                <th className="p-4">Instrument / Strategy</th>
                 <th className="p-4">Type</th>
                 <th className="p-4">Status</th>
                 <th className="p-4 text-right">Qty</th>
-                <th className="p-4 text-right">Avg. Price</th>
+                <th className="p-4 text-right">Avg. Entry</th>
+                <th className="p-4 text-right">Target</th>
+                <th className="p-4 text-right">Exit / SL</th>
                 <th className="p-4 text-right">LTP</th>
                 <th className="p-4 text-right">P&L</th>
                 <th className="p-4 text-center">Action</th>
@@ -312,7 +324,7 @@ export default function PositionsPage() {
             <tbody className="divide-y divide-slate-100 dark:divide-slate-800/50">
               {filteredData.length === 0 ? (
                 <tr>
-                  <td colSpan={8} className="p-8 text-center text-slate-500">
+                  <td colSpan={10} className="p-8 text-center text-slate-500">
                     No positions found matching your filters.
                   </td>
                 </tr>
@@ -331,7 +343,14 @@ export default function PositionsPage() {
                     <tr key={pos.id} className="hover:bg-slate-50 dark:hover:bg-slate-800/20 transition-colors">
                       <td className="p-4">
                         <div className="font-bold text-slate-900 dark:text-white">{formatInstrumentName(pos.symbol)}</div>
-                        <div className="text-xs text-slate-400 font-mono font-normal">{pos.symbol}</div>
+                        <div className="flex items-center gap-1.5 mt-0.5">
+                          <span className="text-xs text-slate-400 font-mono font-normal">{pos.symbol}</span>
+                          {pos.strategyName && (
+                            <span className="text-[10px] px-1.5 py-0.2 rounded bg-slate-100 dark:bg-slate-800 text-slate-500 font-semibold truncate max-w-[130px]">
+                              {pos.strategyName}
+                            </span>
+                          )}
+                        </div>
                       </td>
                       <td className="p-4">
                         <span className={`px-2.5 py-1 text-xs font-bold rounded-md ${
@@ -352,7 +371,13 @@ export default function PositionsPage() {
                         </span>
                       </td>
                       <td className="p-4 text-right font-medium">{pos.qty}</td>
-                      <td className="p-4 text-right text-slate-600 dark:text-slate-400">₹{entryPrice.toFixed(2)}</td>
+                      <td className="p-4 text-right text-slate-600 dark:text-slate-400 font-semibold">₹{entryPrice.toFixed(2)}</td>
+                      <td className="p-4 text-right font-semibold text-emerald-600 dark:text-emerald-400">
+                        {pos.targetPrice ? `₹${pos.targetPrice.toFixed(2)}` : "—"}
+                      </td>
+                      <td className="p-4 text-right font-semibold text-rose-600 dark:text-rose-400">
+                        {pos.stopLossPrice ? `₹${pos.stopLossPrice.toFixed(2)}` : "—"}
+                      </td>
                       <td className="p-4 text-right font-medium">₹{currentPrice.toFixed(2)}</td>
                       <td className={`p-4 text-right font-bold ${isProfit ? 'text-green-500' : 'text-danger'}`}>
                         {isProfit ? '+' : ''}₹{pnl.toFixed(2)}

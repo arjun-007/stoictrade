@@ -120,6 +120,16 @@ export default function GlobalPendingApprovalsBanner() {
                       </span>
                     )}
                   </div>
+
+                  {/* Target and Exit / StopLoss Badges */}
+                  <div className="flex flex-wrap items-center gap-2 mt-1.5 text-xs font-semibold">
+                    <span className="px-2 py-0.5 rounded bg-emerald-100/70 text-emerald-800 dark:bg-emerald-950/50 dark:text-emerald-300 border border-emerald-500/20 flex items-center gap-1">
+                      🎯 Target: ₹{sig.targetPrice > 0 ? sig.targetPrice.toFixed(2) : (sig.price > 0 ? (sig.price * 1.25).toFixed(2) : "—")}
+                    </span>
+                    <span className="px-2 py-0.5 rounded bg-rose-100/70 text-rose-800 dark:bg-rose-950/50 dark:text-rose-300 border border-rose-500/20 flex items-center gap-1">
+                      🛑 Exit / SL: ₹{sig.stopLossPrice > 0 ? sig.stopLossPrice.toFixed(2) : (sig.price > 0 ? Math.max(5, sig.price * 0.85).toFixed(2) : "—")}
+                    </span>
+                  </div>
                 </div>
               </div>
 

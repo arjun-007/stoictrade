@@ -140,12 +140,21 @@ namespace StoicTrade.Api.Controllers
                 if (netQty > 0) unrealized = (ltp - buyAvg) * netQty;
                 else if (netQty < 0) unrealized = (sellAvg - ltp) * Math.Abs(netQty);
 
+                decimal targetPrice = group.FirstOrDefault(p => p.TargetPrice.HasValue && p.TargetPrice > 0)?.TargetPrice 
+                    ?? (buyAvg > 0 ? Math.Round(buyAvg * 1.25m, 2) : 0m);
+                decimal stopLossPrice = group.FirstOrDefault(p => p.StopLossPrice.HasValue && p.StopLossPrice > 0)?.StopLossPrice 
+                    ?? (buyAvg > 0 ? Math.Round(Math.Max(5.0m, buyAvg * 0.85m), 2) : 0m);
+                string strategyName = group.FirstOrDefault(p => !string.IsNullOrEmpty(p.StrategyName))?.StrategyName ?? "Strategy";
+
                 netPositions.Add(new {
                     symbol = canonicalSymbol,
                     netQty = netQty,
                     buyAvg = buyAvg,
                     sellAvg = sellAvg,
                     ltp = ltp,
+                    targetPrice = targetPrice,
+                    stopLossPrice = stopLossPrice,
+                    strategyName = strategyName,
                     realized_profit = realizedProfit,
                     unrealized_profit = unrealized,
                     pl = realizedProfit + unrealized,

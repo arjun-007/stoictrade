@@ -78,6 +78,9 @@ namespace StoicTrade.Api.Services
                     position.TotalBuyValue += signal.Quantity * executionPrice;
                     position.BuyAvg = position.TotalBuyQty > 0 ? position.TotalBuyValue / position.TotalBuyQty : executionPrice;
                     position.NetQty += signal.Quantity;
+                    position.StrategyName = !string.IsNullOrEmpty(signal.StrategyName) ? signal.StrategyName : position.StrategyName;
+                    position.TargetPrice = signal.TargetPrice > 0 ? signal.TargetPrice : Math.Round(executionPrice * 1.25m, 2);
+                    position.StopLossPrice = signal.StopLossPrice > 0 ? signal.StopLossPrice : Math.Round(Math.Max(5.0m, executionPrice * 0.85m), 2);
                 }
                 else
                 {
@@ -98,6 +101,8 @@ namespace StoicTrade.Api.Services
                     position.TotalSellValue = 0;
                     position.BuyAvg = 0;
                     position.SellAvg = 0;
+                    position.TargetPrice = null;
+                    position.StopLossPrice = null;
                 }
 
                 position.UpdatedAt = System.DateTime.UtcNow;

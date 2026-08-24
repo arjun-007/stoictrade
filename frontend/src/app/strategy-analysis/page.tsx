@@ -40,6 +40,8 @@ interface SignalLogEntry {
   action: string;
   instrument: string;
   price: number;
+  targetPrice?: number;
+  stopLossPrice?: number;
   quantity: number;
   status: string; // AutoExecuted | AwaitingApproval | SignalOnly | Blocked
   generatedAt: string;
@@ -52,6 +54,8 @@ interface PendingApproval {
     action: string;
     instrument: string;
     price: number;
+    targetPrice?: number;
+    stopLossPrice?: number;
     quantity: number;
     generatedAt: string;
   };
@@ -521,6 +525,8 @@ export default function StrategyAnalysisPage() {
                     <th className="p-4">Action</th>
                     <th className="p-4">Instrument</th>
                     <th className="p-4 text-right">Price</th>
+                    <th className="p-4 text-right">Target</th>
+                    <th className="p-4 text-right">Exit / SL</th>
                     <th className="p-4 text-right">Qty</th>
                     <th className="p-4">Generated</th>
                     <th className="p-4 text-center">Decision</th>
@@ -529,6 +535,9 @@ export default function StrategyAnalysisPage() {
                 <tbody className="divide-y divide-slate-100 dark:divide-slate-800/50">
                   {pending.map(item => {
                     const isGroupSignal = item.signal.strategyName.startsWith("Group:");
+                    const tgt = item.signal.targetPrice && item.signal.targetPrice > 0 ? item.signal.targetPrice : (item.signal.price > 0 ? item.signal.price * 1.25 : 0);
+                    const sl = item.signal.stopLossPrice && item.signal.stopLossPrice > 0 ? item.signal.stopLossPrice : (item.signal.price > 0 ? Math.max(5, item.signal.price * 0.85) : 0);
+
                     return (
                       <tr key={item.id} className="hover:bg-blue-50/50 dark:hover:bg-blue-900/10 transition-colors">
                         <td className="p-4 font-semibold text-slate-900 dark:text-white">
@@ -556,6 +565,12 @@ export default function StrategyAnalysisPage() {
                         </td>
                         <td className="p-4 font-medium text-slate-700 dark:text-slate-300">{item.signal.instrument}</td>
                         <td className="p-4 text-right font-bold text-slate-900 dark:text-white">₹{item.signal.price.toFixed(2)}</td>
+                        <td className="p-4 text-right font-semibold text-emerald-600 dark:text-emerald-400">
+                          {tgt > 0 ? `₹${tgt.toFixed(2)}` : "—"}
+                        </td>
+                        <td className="p-4 text-right font-semibold text-rose-600 dark:text-rose-400">
+                          {sl > 0 ? `₹${sl.toFixed(2)}` : "—"}
+                        </td>
                         <td className="p-4 text-right text-slate-600 dark:text-slate-400">{item.signal.quantity}</td>
                         <td className="p-4 text-slate-500 text-xs">{fmtTime(item.signal.generatedAt)}</td>
                         <td className="p-4">
@@ -622,6 +637,8 @@ export default function StrategyAnalysisPage() {
                       <th className="p-4">Action</th>
                       <th className="p-4">Instrument</th>
                       <th className="p-4 text-right">Price</th>
+                      <th className="p-4 text-right">Target</th>
+                      <th className="p-4 text-right">Exit / SL</th>
                       <th className="p-4 text-right">Qty</th>
                       <th className="p-4">Status</th>
                     </tr>
@@ -631,6 +648,8 @@ export default function StrategyAnalysisPage() {
                       const isNew = newSignalIds.has(entry.id);
                       const statusMeta = STATUS_META[entry.status] ?? STATUS_META.SignalOnly;
                       const isGroupSignal = entry.strategyName.startsWith("Group:");
+                      const tgt = entry.targetPrice && entry.targetPrice > 0 ? entry.targetPrice : (entry.price > 0 ? entry.price * 1.25 : 0);
+                      const sl = entry.stopLossPrice && entry.stopLossPrice > 0 ? entry.stopLossPrice : (entry.price > 0 ? Math.max(5, entry.price * 0.85) : 0);
 
                       return (
                         <tr
@@ -666,6 +685,12 @@ export default function StrategyAnalysisPage() {
                           </td>
                           <td className="p-4 font-medium text-slate-700 dark:text-slate-300">{entry.instrument}</td>
                           <td className="p-4 text-right font-bold text-slate-900 dark:text-white">₹{entry.price.toFixed(2)}</td>
+                          <td className="p-4 text-right font-semibold text-emerald-600 dark:text-emerald-400">
+                            {tgt > 0 ? `₹${tgt.toFixed(2)}` : "—"}
+                          </td>
+                          <td className="p-4 text-right font-semibold text-rose-600 dark:text-rose-400">
+                            {sl > 0 ? `₹${sl.toFixed(2)}` : "—"}
+                          </td>
                           <td className="p-4 text-right text-slate-600 dark:text-slate-400">{entry.quantity}</td>
                           <td className="p-4">
                             <span className={`px-2.5 py-1 text-xs font-bold rounded-md ${statusMeta.class}`}>

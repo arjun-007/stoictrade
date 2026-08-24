@@ -72,6 +72,9 @@ namespace StoicTrade.Api.Controllers
                     position.BuyAvg = totalVal / position.TotalBuyQty;
                     position.NetQty += request.Quantity;
                     position.TotalBuyValue += trade.ExecutionPrice * request.Quantity;
+                    position.StrategyName = "Manual Entry";
+                    position.TargetPrice = Math.Round(trade.ExecutionPrice * 1.25m, 2);
+                    position.StopLossPrice = Math.Round(Math.Max(5.0m, trade.ExecutionPrice * 0.85m), 2);
                 }
                 else
                 {
@@ -96,6 +99,8 @@ namespace StoicTrade.Api.Controllers
                     position.TotalSellValue = 0;
                     position.BuyAvg = 0;
                     position.SellAvg = 0;
+                    position.TargetPrice = null;
+                    position.StopLossPrice = null;
                 }
 
                 position.UpdatedAt = DateTime.UtcNow;
