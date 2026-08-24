@@ -22,10 +22,13 @@ namespace StoicTrade.Api.Services
         private string? _accessToken;
         private DateTime _tokenExpiry;
 
-        public FyersApiService(ILogger<FyersApiService> logger, IConfiguration config)
+        private readonly IServiceProvider _serviceProvider;
+
+        public FyersApiService(ILogger<FyersApiService> logger, IConfiguration config, IServiceProvider serviceProvider)
         {
             _logger = logger;
             _config = config;
+            _serviceProvider = serviceProvider;
             _httpClient = new HttpClient();
             IsEngineRunning = false;
         }
@@ -68,14 +71,53 @@ namespace StoicTrade.Api.Services
             var tokenData = await tokenRes.Content.ReadFromJsonAsync<JsonElement>();
             
             _accessToken = tokenData.GetProperty("access_token").GetString();
-            _tokenExpiry = DateTime.UtcNow.AddHours(8); // Cache for 8 hours
+            _tokenExpiry = DateTime.UtcNow.AddHours(14); // Cache for full trading day
             
             _logger.LogInformation("Fyers API: Successfully generated new access token!");
             IsEngineRunning = true;
+
+            // Persist token in Redis
+            try
+            {
+                using var scope = _serviceProvider.CreateScope();
+                var redis = scope.ServiceProvider.GetService<RedisService>();
+                if (redis != null && !string.IsNullOrEmpty(_accessToken))
+                {
+                    await redis.SetValueAsync("fyers_access_token", _accessToken, TimeSpan.FromHours(14));
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to persist Fyers access token to Redis");
+            }
+
             return _accessToken ?? string.Empty;
         }
 
-        public string? GetAccessToken() => _accessToken;
+        public string? GetAccessToken()
+        {
+            if (!string.IsNullOrEmpty(_accessToken)) return _accessToken;
+
+            // Attempt to restore token from Redis if server restarted
+            try
+            {
+                using var scope = _serviceProvider.CreateScope();
+                var redis = scope.ServiceProvider.GetService<RedisService>();
+                if (redis != null)
+                {
+                    var savedToken = redis.GetValueAsync("fyers_access_token").GetAwaiter().GetResult();
+                    if (!string.IsNullOrEmpty(savedToken))
+                    {
+                        _accessToken = savedToken;
+                        IsEngineRunning = true;
+                        return _accessToken;
+                    }
+                }
+            }
+            catch { }
+
+            return null;
+        }
 
         private string GenerateTotpPin(string secret)
         {
@@ -111,6 +153,17 @@ namespace StoicTrade.Api.Services
             _logger.LogInformation("Fyers API: Disconnecting engine and clearing active session...");
             IsEngineRunning = false;
             _accessToken = null;
+
+            try
+            {
+                using var scope = _serviceProvider.CreateScope();
+                var redis = scope.ServiceProvider.GetService<RedisService>();
+                if (redis != null)
+                {
+                    redis.DeleteKeyAsync("fyers_access_token").GetAwaiter().GetResult();
+                }
+            }
+            catch { }
         }
 
         public async Task<JsonElement> GetFundsAsync()

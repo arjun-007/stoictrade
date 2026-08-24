@@ -129,7 +129,8 @@ namespace StoicTrade.Api.Services.MarketData
             var spotRes = await _httpClient.GetAsync($"https://api-t1.fyers.in/data/quotes?symbols={spotQuery}", stoppingToken);
             if (!spotRes.IsSuccessStatusCode)
             {
-                // Fall back to paper generation if Fyers API fails
+                var err = await spotRes.Content.ReadAsStringAsync(stoppingToken);
+                _logger.LogWarning("Fyers Poller: Quotes API failed with status {StatusCode}: {Error}. Falling back to simulation.", spotRes.StatusCode, err);
                 await GeneratePaperMarketDataAsync(stoppingToken);
                 return;
             }
@@ -252,8 +253,7 @@ namespace StoicTrade.Api.Services.MarketData
                 _isAggregatorInitialized = true;
             }
 
-            decimal tickVol = _random.Next(2000, 12000);
-            _aggregator.UpdateTick("NSE:NIFTY50-INDEX", _simulatedNiftyPrice, tickVol);
+            _aggregator.UpdateTick("NSE:NIFTY50-INDEX", _simulatedNiftyPrice, (decimal)(15000 + _random.Next(5000)));
 
             // Generate full synthetic option chain
             int atmStrike = (int)Math.Round(_simulatedNiftyPrice / 50.0m) * 50;
@@ -268,8 +268,8 @@ namespace StoicTrade.Api.Services.MarketData
                 if (!strikesMap.ContainsKey(expiry))
                     strikesMap[expiry] = new Dictionary<int, Dictionary<string, object>>();
 
-                // Time value base increases with further expiries
-                decimal timeValueAtm = 120m + (eIdx * 65m);
+                // Realistic time value based on NIFTY option standard premium curve (~80-100 pts ATM)
+                decimal timeValueAtm = 80m + (eIdx * 20m);
 
                 for (int i = -StrikesEachSide; i <= StrikesEachSide; i++)
                 {
@@ -279,7 +279,7 @@ namespace StoicTrade.Api.Services.MarketData
                     // CE Pricing
                     decimal ceIntrinsic = Math.Max(0m, _simulatedNiftyPrice - strike);
                     decimal ceOtmDist = Math.Max(0m, strike - _simulatedNiftyPrice);
-                    decimal ceExtrinsic = Math.Max(1.5m, timeValueAtm * (decimal)Math.Exp((double)(-ceOtmDist / 450m)));
+                    decimal ceExtrinsic = Math.Max(1.0m, timeValueAtm * (decimal)Math.Exp((double)(-ceOtmDist / 280m)));
                     decimal ceLtp = Math.Round(ceIntrinsic + ceExtrinsic, 2);
                     decimal ceChange = Math.Round(change * 0.45m, 2);
 
@@ -289,7 +289,7 @@ namespace StoicTrade.Api.Services.MarketData
                     // PE Pricing
                     decimal peIntrinsic = Math.Max(0m, strike - _simulatedNiftyPrice);
                     decimal peOtmDist = Math.Max(0m, _simulatedNiftyPrice - strike);
-                    decimal peExtrinsic = Math.Max(1.5m, timeValueAtm * (decimal)Math.Exp((double)(-peOtmDist / 450m)));
+                    decimal peExtrinsic = Math.Max(1.0m, timeValueAtm * (decimal)Math.Exp((double)(-peOtmDist / 280m)));
                     decimal peLtp = Math.Round(peIntrinsic + peExtrinsic, 2);
                     decimal peChange = Math.Round(-change * 0.45m, 2);
 
