@@ -39,8 +39,11 @@ namespace StoicTrade.Api.Services.Strategies
 
         // Static log of the last 100 signals — accessible via EngineController
         public static readonly ConcurrentQueue<SignalLogEntry> RecentSignals = new();
+        private static readonly ConcurrentDictionary<string, DateTime> _lastSignalEmissionTime = new();
+        private static readonly TimeSpan SignalCooldown = TimeSpan.FromMinutes(3);
         private const int MaxLogSize = 100;
         private DateTime? _lastSquareOffDate = null;
+        private DateTime? _lastDailyResetDate = null;
 
         public StrategyEngineService(
             ILogger<StrategyEngineService> logger,
@@ -71,8 +74,17 @@ namespace StoicTrade.Api.Services.Strategies
                     var squareOffTime = new TimeSpan(15, 10, 0); // 3:10 PM IST
                     var autoStopCutoff = new TimeSpan(15, 40, 0); // 3:40 PM IST
                     var marketOpen = new TimeSpan(9, 15, 0);      // 9:15 AM IST
+                    var marketClose = new TimeSpan(15, 30, 0);    // 3:30 PM IST
 
-                    // 1. Daily 3:10 PM IST Auto-Square-Off for active positions (Paper & Live)
+                    // 1. Daily 9:15 AM IST Session Reset: Clear stale signal logs for clean day-to-day tracking
+                    if (nowIst >= marketOpen && _lastDailyResetDate != todayIst)
+                    {
+                        _logger.LogInformation("Daily 09:15 AM IST market session opened. Resetting Live Signal Log for clean day-to-day session tracking.");
+                        ClearSignals();
+                        _lastDailyResetDate = todayIst;
+                    }
+
+                    // 2. Daily 3:10 PM IST Auto-Square-Off for active positions (Paper & Live)
                     if (nowIst >= squareOffTime && nowIst < autoStopCutoff)
                     {
                         if (_lastSquareOffDate != todayIst)
@@ -90,7 +102,7 @@ namespace StoicTrade.Api.Services.Strategies
                     var globalSettings = dbContext.GlobalSettings.FirstOrDefault();
                     string tradeMode = globalSettings?.TradeMode ?? "Paper";
 
-                    // 2. Daily 3:40 PM IST Auto-Stop Engine (Live mode only)
+                    // 3. Daily 3:40 PM IST Auto-Stop Engine (Live mode only)
                     if (tradeMode == "Live" && (nowIst >= autoStopCutoff || nowIst < marketOpen))
                     {
                         if (_fyersApi.IsEngineRunning)
@@ -104,24 +116,31 @@ namespace StoicTrade.Api.Services.Strategies
                         continue;
                     }
 
-                    // 3. If Engine is Stopped (manually or by auto-stop), pause execution and make NO outbound calls
+                    // 4. Strict Indian Market Hours Guard: Only evaluate strategies between 09:15 AM and 03:30 PM IST
+                    if (nowIst < marketOpen || nowIst > marketClose)
+                    {
+                        await Task.Delay(5000, stoppingToken);
+                        continue;
+                    }
+
+                    // 5. If Engine is Stopped (manually or by auto-stop), pause execution and make NO outbound calls
                     if (!_fyersApi.IsEngineRunning)
                     {
                         await Task.Delay(5000, stoppingToken);
                         continue;
                     }
 
-                    // 4. Fetch enabled strategies and strategy groups from DB
+                    // 6. Fetch enabled strategies and strategy groups from DB
                     var activeConfigs = dbContext.StrategyConfigs.Where(s => s.IsEnabled).ToList();
                     var activeGroups = dbContext.StrategyGroups.Where(g => g.IsEnabled).ToList();
 
-                    // 5. Fetch market data based on TradeMode
+                    // 7. Fetch market data based on TradeMode
                     var marketCache = scope.ServiceProvider.GetRequiredService<StoicTrade.Api.Services.MarketData.MarketDataCache>();
                     var spot = marketCache.GetSpotData("NIFTY");
                     decimal currentPrice = (spot != null && spot.Price > 0) ? spot.Price : 24250.0m;
                     string marketDataJson = $"{{\"symbol\": \"NIFTY\", \"price\": {currentPrice}}}";
 
-                    // 6. Evaluate each active standalone strategy
+                    // 8. Evaluate each active standalone strategy
                     var tickSignals = new List<Signal>();
                     var optionEngine = scope.ServiceProvider.GetRequiredService<OptionSelectionEngine>();
                     foreach (var config in activeConfigs)
@@ -160,32 +179,36 @@ namespace StoicTrade.Api.Services.Strategies
                                     }
                                 }
 
-                                tickSignals.Add(signal);
-                                // Determine log status based on operating mode
-                                string logStatus = config.OperatingMode switch
+                                // Anti-Spam / Cooldown Check: avoid repeating the same strategy signal within cooldown window
+                                if (!IsInCooldown(signal.StrategyName, signal.Instrument, signal.Action))
                                 {
-                                    "Automatic" => "AutoExecuted",
-                                    "ApprovalRequired" => "AwaitingApproval",
-                                    "SignalOnly" => "SignalOnly",
-                                    _ => "SignalOnly"
-                                };
-                                AddToSignalLog(new SignalLogEntry
-                                {
-                                    StrategyName = signal.StrategyName,
-                                    Action = signal.Action,
-                                    Instrument = signal.Instrument,
-                                    Price = signal.Price,
-                                    TargetPrice = signal.TargetPrice,
-                                    StopLossPrice = signal.StopLossPrice,
-                                    Quantity = signal.Quantity,
-                                    Status = logStatus,
-                                    GeneratedAt = DateTime.UtcNow
-                                });
+                                    tickSignals.Add(signal);
+                                    // Determine log status based on operating mode
+                                    string logStatus = config.OperatingMode switch
+                                    {
+                                        "Automatic" => "AutoExecuted",
+                                        "ApprovalRequired" => "AwaitingApproval",
+                                        "SignalOnly" => "SignalOnly",
+                                        _ => "SignalOnly"
+                                    };
+                                    AddToSignalLog(new SignalLogEntry
+                                    {
+                                        StrategyName = signal.StrategyName,
+                                        Action = signal.Action,
+                                        Instrument = signal.Instrument,
+                                        Price = signal.Price,
+                                        TargetPrice = signal.TargetPrice,
+                                        StopLossPrice = signal.StopLossPrice,
+                                        Quantity = signal.Quantity,
+                                        Status = logStatus,
+                                        GeneratedAt = DateTime.UtcNow
+                                    });
+                                }
                             }
                         }
                     }
 
-                    // 7. Evaluate active Strategy Groups (Multi-Strategy Consensus)
+                    // 9. Evaluate active Strategy Groups (Multi-Strategy Consensus)
                     var allConfigs = dbContext.StrategyConfigs.ToList();
                     foreach (var group in activeGroups)
                     {
@@ -269,35 +292,39 @@ namespace StoicTrade.Api.Services.Strategies
                                 groupSignal.StopLossPrice = Math.Round(Math.Max(5.0m, groupSignal.Price - optionSlDelta), 2);
                             }
 
-                            tickSignals.Add(groupSignal);
+                            // Anti-Spam / Cooldown Check for Squad signals
+                            if (!IsInCooldown(groupSignal.StrategyName, groupSignal.Instrument, groupSignal.Action))
+                            {
+                                tickSignals.Add(groupSignal);
 
-                            string logStatus = group.OperatingMode switch
-                            {
-                                "Automatic" => "AutoExecuted",
-                                "ApprovalRequired" => "AwaitingApproval",
-                                "SignalOnly" => "SignalOnly",
-                                _ => "SignalOnly"
-                            };
-                            AddToSignalLog(new SignalLogEntry
-                            {
-                                StrategyName = groupSignal.StrategyName,
-                                Action = groupSignal.Action,
-                                Instrument = groupSignal.Instrument,
-                                Price = groupSignal.Price,
-                                TargetPrice = groupSignal.TargetPrice,
-                                StopLossPrice = groupSignal.StopLossPrice,
-                                Quantity = groupSignal.Quantity,
-                                Status = logStatus,
-                                GeneratedAt = DateTime.UtcNow
-                            });
+                                string logStatus = group.OperatingMode switch
+                                {
+                                    "Automatic" => "AutoExecuted",
+                                    "ApprovalRequired" => "AwaitingApproval",
+                                    "SignalOnly" => "SignalOnly",
+                                    _ => "SignalOnly"
+                                };
+                                AddToSignalLog(new SignalLogEntry
+                                {
+                                    StrategyName = groupSignal.StrategyName,
+                                    Action = groupSignal.Action,
+                                    Instrument = groupSignal.Instrument,
+                                    Price = groupSignal.Price,
+                                    TargetPrice = groupSignal.TargetPrice,
+                                    StopLossPrice = groupSignal.StopLossPrice,
+                                    Quantity = groupSignal.Quantity,
+                                    Status = logStatus,
+                                    GeneratedAt = DateTime.UtcNow
+                                });
+                            }
                         }
                     }
 
-                    // 8. Aggregate signals
+                    // 10. Aggregate signals
                     var aggregator = scope.ServiceProvider.GetRequiredService<SignalAggregatorService>();
                     var aggregatedSignals = aggregator.Aggregate(tickSignals);
 
-                    // 5. Send to Risk Engine
+                    // 11. Send to Risk Engine
                     var riskEngine = scope.ServiceProvider.GetRequiredService<StoicTrade.Api.Services.RiskEngine>();
                     foreach (var signal in aggregatedSignals)
                     {
@@ -320,6 +347,26 @@ namespace StoicTrade.Api.Services.Strategies
             }
 
             _logger.LogInformation("Strategy Engine is stopping.");
+        }
+
+        private static bool IsInCooldown(string strategyName, string instrument, string action)
+        {
+            string key = $"{strategyName}:{instrument}:{action}";
+            if (_lastSignalEmissionTime.TryGetValue(key, out var lastTime))
+            {
+                if (DateTime.UtcNow - lastTime < SignalCooldown)
+                {
+                    return true;
+                }
+            }
+            _lastSignalEmissionTime[key] = DateTime.UtcNow;
+            return false;
+        }
+
+        public static void ClearSignals()
+        {
+            while (RecentSignals.TryDequeue(out _)) { }
+            _lastSignalEmissionTime.Clear();
         }
 
         private static void AddToSignalLog(SignalLogEntry entry)

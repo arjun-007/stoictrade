@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import {
   Activity, Zap, Shield, Radar, BarChart2, CheckCircle2, XCircle,
   TrendingUp, TrendingDown, Clock, RefreshCcw, ChevronDown, ChevronUp,
-  Layers, Users, CheckSquare
+  Layers, Users, CheckSquare, Trash2, Calendar
 } from "lucide-react";
 import { fetchWithAuth } from "@/lib/api";
 
@@ -116,6 +116,8 @@ export default function StrategyAnalysisPage() {
   const prevSignalIdsRef                    = useRef<Set<string>>(new Set());
   const [showLog, setShowLog]               = useState(true);
   const [approvingId, setApprovingId]       = useState<string | null>(null);
+  const [dateFilter, setDateFilter]         = useState<"today" | "yesterday" | "all">("today");
+  const [clearingLog, setClearingLog]       = useState(false);
 
   // ── Fetch configuration data ───────────────────────────────────────────────
   const loadInitialData = async () => {
@@ -230,10 +232,60 @@ export default function StrategyAnalysisPage() {
     }
   };
 
+  const handleClearLog = async () => {
+    if (!confirm("Are you sure you want to clear the Live Signal Log?")) return;
+    setClearingLog(true);
+    try {
+      await fetchWithAuth("/api/engine/signals/clear", { method: "POST" });
+      setSignalLog([]);
+    } catch (err) {
+      console.error("Failed to clear signals", err);
+    } finally {
+      setClearingLog(false);
+    }
+  };
+
   const fmtTime = (iso: string) => {
     const d = new Date(iso);
     return d.toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
   };
+
+  const getSignalDayCategory = (iso: string): "today" | "yesterday" | "older" => {
+    const d = new Date(iso);
+    const now = new Date();
+    const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+    const yesterdayStart = todayStart - 24 * 60 * 60 * 1000;
+    const t = d.getTime();
+
+    if (t >= todayStart) return "today";
+    if (t >= yesterdayStart && t < todayStart) return "yesterday";
+    return "older";
+  };
+
+  const formatSignalDateBadge = (iso: string) => {
+    const d = new Date(iso);
+    const cat = getSignalDayCategory(iso);
+    const timeStr = d.toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+    
+    if (cat === "today") {
+      return { label: "Today", timeStr, isToday: true, isYesterday: false };
+    } else if (cat === "yesterday") {
+      return { label: "Yesterday", timeStr, isToday: false, isYesterday: true };
+    } else {
+      const dateStr = d.toLocaleDateString("en-IN", { day: "2-digit", month: "short" });
+      return { label: dateStr, timeStr, isToday: false, isYesterday: false };
+    }
+  };
+
+  const todaySignalsCount = signalLog.filter(s => getSignalDayCategory(s.generatedAt) === "today").length;
+  const yesterdaySignalsCount = signalLog.filter(s => getSignalDayCategory(s.generatedAt) === "yesterday").length;
+  const filteredSignalLog = signalLog.filter(entry => {
+    if (dateFilter === "all") return true;
+    const cat = getSignalDayCategory(entry.generatedAt);
+    if (dateFilter === "today") return cat === "today";
+    if (dateFilter === "yesterday") return cat === "yesterday";
+    return true;
+  });
 
   const getMemberNames = (strategyIdsJson: string): string[] => {
     try {
@@ -605,26 +657,87 @@ export default function StrategyAnalysisPage() {
 
       {/* ── Signal Log ── */}
       <section>
-        <button
-          onClick={() => setShowLog(v => !v)}
-          className="w-full flex items-center justify-between gap-3 mb-4 group"
-        >
+        <div className="flex flex-wrap items-center justify-between gap-4 mb-4">
           <div className="flex items-center gap-3">
-            <Activity className="w-5 h-5 text-indigo-500" />
-            <h2 className="text-xl font-bold text-slate-900 dark:text-white">Live Signal Log</h2>
-            <span className="px-2.5 py-0.5 rounded-full text-xs font-bold bg-indigo-100 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-300">
-              {signalLog.length}
-            </span>
+            <button
+              onClick={() => setShowLog(v => !v)}
+              className="flex items-center gap-3 group text-left"
+            >
+              <Activity className="w-5 h-5 text-indigo-500" />
+              <h2 className="text-xl font-bold text-slate-900 dark:text-white">Live Signal Log</h2>
+              <span className="px-2.5 py-0.5 rounded-full text-xs font-bold bg-indigo-100 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-300">
+                {signalLog.length}
+              </span>
+              {showLog ? <ChevronUp className="w-5 h-5 text-slate-400" /> : <ChevronDown className="w-5 h-5 text-slate-400" />}
+            </button>
           </div>
-          {showLog ? <ChevronUp className="w-5 h-5 text-slate-400" /> : <ChevronDown className="w-5 h-5 text-slate-400" />}
-        </button>
+
+          {showLog && (
+            <div className="flex items-center gap-2">
+              {/* Day filter pills */}
+              <div className="flex items-center bg-slate-100 dark:bg-slate-800 p-1 rounded-xl text-xs font-semibold">
+                <button
+                  onClick={() => setDateFilter("today")}
+                  className={`px-3 py-1 rounded-lg transition-all ${
+                    dateFilter === "today"
+                      ? "bg-white dark:bg-slate-700 text-indigo-600 dark:text-indigo-300 shadow-sm"
+                      : "text-slate-500 hover:text-slate-800 dark:hover:text-slate-200"
+                  }`}
+                >
+                  Today ({todaySignalsCount})
+                </button>
+                <button
+                  onClick={() => setDateFilter("yesterday")}
+                  className={`px-3 py-1 rounded-lg transition-all ${
+                    dateFilter === "yesterday"
+                      ? "bg-white dark:bg-slate-700 text-indigo-600 dark:text-indigo-300 shadow-sm"
+                      : "text-slate-500 hover:text-slate-800 dark:hover:text-slate-200"
+                  }`}
+                >
+                  Yesterday ({yesterdaySignalsCount})
+                </button>
+                <button
+                  onClick={() => setDateFilter("all")}
+                  className={`px-3 py-1 rounded-lg transition-all ${
+                    dateFilter === "all"
+                      ? "bg-white dark:bg-slate-700 text-indigo-600 dark:text-indigo-300 shadow-sm"
+                      : "text-slate-500 hover:text-slate-800 dark:hover:text-slate-200"
+                  }`}
+                >
+                  All ({signalLog.length})
+                </button>
+              </div>
+
+              {/* Clear log button */}
+              {signalLog.length > 0 && (
+                <button
+                  onClick={handleClearLog}
+                  disabled={clearingLog}
+                  className="flex items-center gap-1.5 px-3 py-1.5 bg-rose-50 hover:bg-rose-100 dark:bg-rose-950/40 dark:hover:bg-rose-900/50 text-rose-600 dark:text-rose-400 rounded-xl text-xs font-semibold transition-colors disabled:opacity-50"
+                  title="Clear live signal history"
+                >
+                  <Trash2 className="w-3.5 h-3.5" />
+                  Clear Log
+                </button>
+              )}
+            </div>
+          )}
+        </div>
 
         {showLog && (
-          signalLog.length === 0 ? (
+          filteredSignalLog.length === 0 ? (
             <div className="bg-surface border border-slate-200 dark:border-slate-800 rounded-2xl p-8 text-center text-slate-500">
               <Activity className="w-10 h-10 mx-auto mb-3 text-slate-300 dark:text-slate-700" />
-              <p className="font-semibold">No signals generated yet</p>
-              <p className="text-sm mt-1">Signals will appear here as the strategy engine scans the market.</p>
+              <p className="font-semibold">
+                {signalLog.length === 0
+                  ? "No signals generated yet"
+                  : `No signals recorded for ${dateFilter === "today" ? "Today" : dateFilter === "yesterday" ? "Yesterday" : "the selected period"}`}
+              </p>
+              <p className="text-sm mt-1">
+                {signalLog.length === 0
+                  ? "Signals will appear here during market hours (09:15 AM – 03:30 PM IST)."
+                  : "Try switching to the 'All' tab to view signals from other dates."}
+              </p>
             </div>
           ) : (
             <div className="bg-surface border border-slate-200 dark:border-slate-800 rounded-2xl overflow-hidden shadow-sm">
@@ -632,7 +745,7 @@ export default function StrategyAnalysisPage() {
                 <table className="w-full text-left border-collapse text-sm">
                   <thead className="sticky top-0 z-10">
                     <tr className="bg-slate-50 dark:bg-slate-800/90 text-slate-500 text-xs font-semibold tracking-wider uppercase border-b border-slate-200 dark:border-slate-800">
-                      <th className="p-4">Time</th>
+                      <th className="p-4">Time &amp; Date</th>
                       <th className="p-4">Origin / Squad</th>
                       <th className="p-4">Action</th>
                       <th className="p-4">Instrument</th>
@@ -644,10 +757,11 @@ export default function StrategyAnalysisPage() {
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100 dark:divide-slate-800/50">
-                    {signalLog.map(entry => {
+                    {filteredSignalLog.map(entry => {
                       const isNew = newSignalIds.has(entry.id);
                       const statusMeta = STATUS_META[entry.status] ?? STATUS_META.SignalOnly;
                       const isGroupSignal = entry.strategyName.startsWith("Group:");
+                      const dateBadge = formatSignalDateBadge(entry.generatedAt);
                       const tgt = entry.targetPrice && entry.targetPrice > 0 ? entry.targetPrice : (entry.price > 0 ? entry.price * 1.25 : 0);
                       const sl = entry.stopLossPrice && entry.stopLossPrice > 0 ? entry.stopLossPrice : (entry.price > 0 ? Math.max(5, entry.price * 0.85) : 0);
 
@@ -660,7 +774,21 @@ export default function StrategyAnalysisPage() {
                               : "hover:bg-slate-50 dark:hover:bg-slate-800/30"
                           }`}
                         >
-                          <td className="p-4 text-slate-500 text-xs font-mono">{fmtTime(entry.generatedAt)}</td>
+                          <td className="p-4 text-xs font-mono">
+                            <div className="flex flex-col">
+                              <span className="font-bold text-slate-900 dark:text-slate-100">{dateBadge.timeStr}</span>
+                              <span className={`text-[10px] font-semibold flex items-center gap-1 mt-0.5 ${
+                                dateBadge.isToday
+                                  ? "text-emerald-600 dark:text-emerald-400"
+                                  : dateBadge.isYesterday
+                                  ? "text-amber-600 dark:text-amber-400"
+                                  : "text-slate-400"
+                              }`}>
+                                <Calendar className="w-2.5 h-2.5" />
+                                {dateBadge.label}
+                              </span>
+                            </div>
+                          </td>
                           <td className="p-4 font-medium text-slate-700 dark:text-slate-300">
                             <div className="flex items-center gap-2">
                               {isGroupSignal ? (
