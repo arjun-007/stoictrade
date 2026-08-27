@@ -85,7 +85,21 @@ namespace StoicTrade.Api.Controllers
             try
             {
                 var expectedHash = _config["MASTER_PIN_HASH"] ?? "73575068bb4b3b7f4ccc6f6eada01a7e0bf61afea3d0ce77d64cb7d7284e11a8";
-                if (string.IsNullOrEmpty(request.PinHash) || request.PinHash.ToLowerInvariant() != expectedHash.ToLowerInvariant())
+                var input = (!string.IsNullOrEmpty(request.PinHash) ? request.PinHash : request.Pin)?.Trim() ?? "";
+                
+                string computedHash;
+                if (input.Length == 64 && System.Text.RegularExpressions.Regex.IsMatch(input, @"\A\b[0-9a-fA-F]+\b\Z"))
+                {
+                    computedHash = input.ToLowerInvariant();
+                }
+                else
+                {
+                    using var sha256 = System.Security.Cryptography.SHA256.Create();
+                    var bytes = sha256.ComputeHash(Encoding.UTF8.GetBytes(input));
+                    computedHash = Convert.ToHexString(bytes).ToLowerInvariant();
+                }
+
+                if (string.IsNullOrEmpty(computedHash) || computedHash != expectedHash.ToLowerInvariant())
                 {
                     _logger.LogWarning("Unauthorized PIN Login attempt.");
                     return Unauthorized(new { Message = "Invalid Master PIN." });
@@ -124,6 +138,7 @@ namespace StoicTrade.Api.Controllers
 
     public class PinLoginRequest
     {
+        public string Pin { get; set; } = string.Empty;
         public string PinHash { get; set; } = string.Empty;
     }
 }

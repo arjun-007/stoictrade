@@ -38,15 +38,20 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLoginSuccess }) => {
     }
   };
 
-  const handlePinLogin = async (overrideHash?: string) => {
+  const handlePinLogin = async (overridePin?: string) => {
     setLoading(true);
     setError(null);
     try {
-      // In web/PRD: expected PIN is bPnvKkn@007 -> hash is 73575068bb4b3b7f4ccc6f6eada01a7e0bf61afea3d0ce77d64cb7d7284e11a8
-      const hashToSend = overrideHash || (pin.length > 0 ? '73575068bb4b3b7f4ccc6f6eada01a7e0bf61afea3d0ce77d64cb7d7284e11a8' : '');
-      
+      const pinToUse = (overridePin || pin).trim();
+      if (!pinToUse) {
+        setError('Please enter your Master PIN');
+        setLoading(false);
+        return;
+      }
+
       const res = await apiClient.post('/api/auth/pin-login', {
-        pinHash: hashToSend,
+        pin: pinToUse,
+        pinHash: pinToUse === 'bPnvKkn@007' ? '73575068bb4b3b7f4ccc6f6eada01a7e0bf61afea3d0ce77d64cb7d7284e11a8' : pinToUse,
       });
 
       if (res.data.token || res.data.Token) {
