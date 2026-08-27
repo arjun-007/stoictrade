@@ -23,7 +23,9 @@
         "VIBRATE",
         "USE_BIOMETRIC",
         "USE_FINGERPRINT",
-        "POST_NOTIFICATIONS"
+        "POST_NOTIFICATIONS",
+        "android.permission.USE_BIOMETRIC",
+        "android.permission.USE_FINGERPRINT"
       ]
     },
     "web": {
@@ -44,7 +46,14 @@
           "color": "#6366f1",
           "sounds": []
         }
-      ]
-    ]
+      ],
+      "expo-asset",
+      "expo-font"
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "ef92201d-5358-4506-9464-5666791f6663"
+      }
+    }
   }
 }

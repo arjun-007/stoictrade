@@ -1,7 +1,7 @@
 import axios from 'axios';
 import { getAuthToken } from './auth';
 
-export const API_BASE_URL = 'https://api.stoictrade.in';
+export const API_BASE_URL = process.env.EXPO_PUBLIC_API_URL || 'https://api.stoictrade.in';
 
 export const apiClient = axios.create({
   baseURL: API_BASE_URL,
