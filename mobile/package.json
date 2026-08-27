@@ -16,6 +16,7 @@
     "lucide-react-native": "^0.475.0",
     "react": "19.1.0",
     "react-native": "0.81.5",
+    "react-native-safe-area-context": "^5.9.1",
     "react-native-svg": "15.12.1"
   },
   "devDependencies": {

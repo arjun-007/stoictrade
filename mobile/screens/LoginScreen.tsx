@@ -6,10 +6,10 @@ import {
   TouchableOpacity,
   TextInput,
   ActivityIndicator,
-  SafeAreaView,
   StatusBar,
   Alert,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { Zap, Lock, Fingerprint, ArrowRight, ShieldCheck } from 'lucide-react-native';
 import * as Haptics from 'expo-haptics';
 import { COLORS } from '../lib/theme';
