@@ -36,31 +36,30 @@ export async function setupNotificationChannels(): Promise<void> {
 }
 
 export async function registerForPushNotificationsAsync(): Promise<string | null> {
-  let token: string | null = null;
-  
-  const { status: existingStatus } = await Notifications.getPermissionsAsync();
-  let finalStatus = existingStatus;
-  
-  if (existingStatus !== 'granted') {
-    const { status } = await Notifications.requestPermissionsAsync();
-    finalStatus = status;
-  }
-  
-  if (finalStatus !== 'granted') {
-    console.warn('Failed to get push notification permission');
+  try {
+    const { status: existingStatus } = await Notifications.getPermissionsAsync();
+    let finalStatus = existingStatus;
+    
+    if (existingStatus !== 'granted') {
+      const { status } = await Notifications.requestPermissionsAsync();
+      finalStatus = status;
+    }
+    
+    if (finalStatus !== 'granted') {
+      return null;
+    }
+    
+    const pushTokenData = await Notifications.getExpoPushTokenAsync({
+      projectId: 'ef92201d-5358-4506-9464-5666791f6663',
+    });
+    const token = pushTokenData.data;
+    console.log('Expo Push Token registered:', token);
+    await setupNotificationChannels();
+    return token;
+  } catch (e) {
+    // In Expo Go sandbox, remote push notifications require standalone APK build
     return null;
   }
-  
-  try {
-    const pushTokenData = await Notifications.getExpoPushTokenAsync();
-    token = pushTokenData.data;
-    console.log('Expo Push Token:', token);
-  } catch (e) {
-    console.warn('Could not fetch push token:', e);
-  }
-  
-  await setupNotificationChannels();
-  return token;
 }
 
 export async function triggerLocalSignalAlert(strategyName: string, action: string, instrument: string, price: number): Promise<void> {
