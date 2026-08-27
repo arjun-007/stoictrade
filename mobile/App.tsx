@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { StyleSheet, View, Text, TouchableOpacity, SafeAreaView, StatusBar, Alert } from 'react-native';
+import { StyleSheet, View, Text, TouchableOpacity, SafeAreaView, StatusBar, Alert, Linking } from 'react-native';
 import {
   LayoutDashboard,
   Eye,
@@ -67,8 +67,19 @@ export default function App() {
     const endpoint = isEngineRunning ? 'stop' : 'start';
     try {
       const res = await apiClient.post(`/api/engine/${endpoint}`);
-      if (res.data.authUrl || res.data.AuthUrl) {
-        Alert.alert('Fyers Auth', 'Please authenticate on your web browser or Fyers app.');
+      const redirectUrl = res.data.authUrl || res.data.AuthUrl;
+      if (redirectUrl) {
+        Alert.alert(
+          'Fyers Login Required',
+          'Opening Fyers authentication in your browser to connect live market feeds.',
+          [
+            { text: 'Cancel', style: 'cancel' },
+            {
+              text: 'Open Fyers Login',
+              onPress: () => Linking.openURL(redirectUrl),
+            },
+          ]
+        );
       } else {
         setIsEngineRunning(!isEngineRunning);
       }

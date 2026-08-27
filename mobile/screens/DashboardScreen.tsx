@@ -7,6 +7,7 @@ import {
   RefreshControl,
   TouchableOpacity,
   Alert,
+  Linking,
 } from 'react-native';
 import {
   TrendingUp,
@@ -104,8 +105,19 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ onNavigateToTa
     const endpoint = isEngineRunning ? 'stop' : 'start';
     try {
       const res = await apiClient.post(`/api/engine/${endpoint}`);
-      if (res.data.authUrl || res.data.AuthUrl) {
-        Alert.alert('Fyers Auth Required', 'Please authenticate with Fyers to connect live market data.');
+      const redirectUrl = res.data.authUrl || res.data.AuthUrl;
+      if (redirectUrl) {
+        Alert.alert(
+          'Fyers Login Required',
+          'Opening Fyers authentication in your browser to connect live market feeds.',
+          [
+            { text: 'Cancel', style: 'cancel' },
+            {
+              text: 'Open Fyers Login',
+              onPress: () => Linking.openURL(redirectUrl),
+            },
+          ]
+        );
       } else {
         setIsEngineRunning(!isEngineRunning);
         Alert.alert('Engine Status', `Strategy Engine ${isEngineRunning ? 'Stopped' : 'Started'}`);

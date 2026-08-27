@@ -1,36 +1,45 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity, RefreshControl, Alert } from 'react-native';
-import { Layers, Activity, Trash2, Calendar } from 'lucide-react-native';
+import { Layers, Activity, ShieldCheck, Cpu, Trash2, Calendar } from 'lucide-react-native';
 import * as Haptics from 'expo-haptics';
 import { COLORS } from '../lib/theme';
 import { apiClient } from '../lib/api';
 import { SquadCard, StrategyGroupData } from '../components/SquadCard';
+import { StrategyCard, StrategyItemData } from '../components/StrategyCard';
 import { SignalLogCard, SignalLogData } from '../components/SignalLogCard';
+import { ApprovalQueueCard, PendingSignal } from '../components/ApprovalQueueCard';
+
+type AnalysisTab = 'approvals' | 'squads' | 'strategies' | 'signals';
 
 export const AnalysisScreen: React.FC = () => {
-  const [activeTab, setActiveTab] = useState<'squads' | 'signals'>('squads');
+  const [activeTab, setActiveTab] = useState<AnalysisTab>('approvals');
   const [squads, setSquads] = useState<StrategyGroupData[]>([]);
-  const [allStrategies, setAllStrategies] = useState<{ id: number; strategyName: string }[]>([]);
+  const [strategies, setStrategies] = useState<StrategyItemData[]>([]);
+  const [pendingApprovals, setPendingApprovals] = useState<PendingSignal[]>([]);
   const [signals, setSignals] = useState<SignalLogData[]>([]);
   const [dateFilter, setDateFilter] = useState<'today' | 'yesterday' | 'all'>('today');
   const [refreshing, setRefreshing] = useState(false);
 
   const fetchData = useCallback(async () => {
     try {
-      const [squadsRes, stratRes, signalsRes] = await Promise.allSettled([
+      const [squadsRes, stratRes, signalsRes, approvalsRes] = await Promise.allSettled([
         apiClient.get('/api/strategygroups'),
         apiClient.get('/api/strategyconfig'),
         apiClient.get('/api/engine/signals'),
+        apiClient.get('/api/approval/pending'),
       ]);
 
       if (squadsRes.status === 'fulfilled') {
         setSquads(squadsRes.value.data);
       }
       if (stratRes.status === 'fulfilled') {
-        setAllStrategies(stratRes.value.data);
+        setStrategies(stratRes.value.data);
       }
       if (signalsRes.status === 'fulfilled' && Array.isArray(signalsRes.value.data)) {
         setSignals(signalsRes.value.data);
+      }
+      if (approvalsRes.status === 'fulfilled' && Array.isArray(approvalsRes.value.data)) {
+        setPendingApprovals(approvalsRes.value.data);
       }
     } catch (err) {
       console.error('Error fetching analysis data:', err);
@@ -49,6 +58,26 @@ export const AnalysisScreen: React.FC = () => {
     setRefreshing(false);
   };
 
+  const handleApproveSignal = async (id: string) => {
+    try {
+      await apiClient.post(`/api/approval/approve/${id}`);
+      Alert.alert('Trade Approved', 'Signal approved and executed.');
+      fetchData();
+    } catch (err: any) {
+      Alert.alert('Error', err.response?.data?.message || 'Failed to approve signal');
+    }
+  };
+
+  const handleDenySignal = async (id: string) => {
+    try {
+      await apiClient.post(`/api/approval/deny/${id}`);
+      Alert.alert('Trade Denied', 'Signal removed from approval queue.');
+      fetchData();
+    } catch (err: any) {
+      Alert.alert('Error', err.response?.data?.message || 'Failed to deny signal');
+    }
+  };
+
   const handleToggleSquad = async (id: number, currentValue: boolean) => {
     Haptics.selectionAsync();
     try {
@@ -58,6 +87,18 @@ export const AnalysisScreen: React.FC = () => {
       );
     } catch (err: any) {
       Alert.alert('Error', err.response?.data?.error || 'Failed to toggle squad');
+    }
+  };
+
+  const handleToggleStrategy = async (id: number, currentValue: boolean) => {
+    Haptics.selectionAsync();
+    try {
+      await apiClient.post(`/api/strategyconfig/${id}/toggle`);
+      setStrategies((prev) =>
+        prev.map((st) => (st.id === id ? { ...st, isEnabled: !currentValue } : st))
+      );
+    } catch (err: any) {
+      Alert.alert('Error', err.response?.data?.error || 'Failed to toggle strategy');
     }
   };
 
@@ -100,50 +141,125 @@ export const AnalysisScreen: React.FC = () => {
 
   return (
     <View style={styles.container}>
-      {/* Top Segmented Tabs */}
-      <View style={styles.segmentContainer}>
+      {/* Segmented Horizontal Tabs */}
+      <ScrollView
+        horizontal
+        showsHorizontalScrollIndicator={false}
+        style={styles.tabsScrollView}
+        contentContainerStyle={styles.tabsContainer}
+      >
         <TouchableOpacity
-          style={[styles.segmentBtn, activeTab === 'squads' && styles.segmentActive]}
+          style={[styles.tabBtn, activeTab === 'approvals' && styles.tabActive]}
+          onPress={() => { setActiveTab('approvals'); Haptics.selectionAsync(); }}
+        >
+          <ShieldCheck size={15} color={activeTab === 'approvals' ? '#ffffff' : COLORS.textMuted} />
+          <Text style={[styles.tabText, activeTab === 'approvals' && styles.textWhite]}>
+            Approvals ({pendingApprovals.length})
+          </Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          style={[styles.tabBtn, activeTab === 'squads' && styles.tabActive]}
           onPress={() => { setActiveTab('squads'); Haptics.selectionAsync(); }}
         >
-          <Layers size={16} color={activeTab === 'squads' ? '#ffffff' : COLORS.textMuted} />
-          <Text style={[styles.segmentText, activeTab === 'squads' && styles.textWhite]}>
-            Strategy Squads ({squads.length})
+          <Layers size={15} color={activeTab === 'squads' ? '#ffffff' : COLORS.textMuted} />
+          <Text style={[styles.tabText, activeTab === 'squads' && styles.textWhite]}>
+            Squads ({squads.length})
           </Text>
         </TouchableOpacity>
 
         <TouchableOpacity
-          style={[styles.segmentBtn, activeTab === 'signals' && styles.segmentActive]}
-          onPress={() => { setActiveTab('signals'); Haptics.selectionAsync(); }}
+          style={[styles.tabBtn, activeTab === 'strategies' && styles.tabActive]}
+          onPress={() => { setActiveTab('strategies'); Haptics.selectionAsync(); }}
         >
-          <Activity size={16} color={activeTab === 'signals' ? '#ffffff' : COLORS.textMuted} />
-          <Text style={[styles.segmentText, activeTab === 'signals' && styles.textWhite]}>
-            Live Signal Log ({signals.length})
+          <Cpu size={15} color={activeTab === 'strategies' ? '#ffffff' : COLORS.textMuted} />
+          <Text style={[styles.tabText, activeTab === 'strategies' && styles.textWhite]}>
+            Strategies ({strategies.length})
           </Text>
         </TouchableOpacity>
-      </View>
 
+        <TouchableOpacity
+          style={[styles.tabBtn, activeTab === 'signals' && styles.tabActive]}
+          onPress={() => { setActiveTab('signals'); Haptics.selectionAsync(); }}
+        >
+          <Activity size={15} color={activeTab === 'signals' ? '#ffffff' : COLORS.textMuted} />
+          <Text style={[styles.tabText, activeTab === 'signals' && styles.textWhite]}>
+            Signal Log ({signals.length})
+          </Text>
+        </TouchableOpacity>
+      </ScrollView>
+
+      {/* Main Tab Content Area */}
       <ScrollView
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={COLORS.primary} />}
         contentContainerStyle={{ paddingBottom: 40 }}
       >
-        {activeTab === 'squads' ? (
+        {/* TAB 1: APPROVAL QUEUE */}
+        {activeTab === 'approvals' && (
+          <View>
+            <View style={styles.sectionHeader}>
+              <Text style={styles.sectionTitle}>Squad & Strategy Approval Queue</Text>
+              <Text style={styles.sectionDesc}>High-confluence setups awaiting your manual authorization before execution</Text>
+            </View>
+
+            {pendingApprovals.length === 0 ? (
+              <View style={styles.emptyBox}>
+                <ShieldCheck size={36} color={COLORS.profit} />
+                <Text style={styles.emptyTitle}>Approval Queue is Clear</Text>
+                <Text style={styles.emptyDesc}>New squad consensus setups requiring manual approval will appear here with instant trade buttons.</Text>
+              </View>
+            ) : (
+              pendingApprovals.map((item) => (
+                <ApprovalQueueCard
+                  key={item.id}
+                  item={item}
+                  onApprove={handleApproveSignal}
+                  onDeny={handleDenySignal}
+                />
+              ))
+            )}
+          </View>
+        )}
+
+        {/* TAB 2: STRATEGY SQUADS */}
+        {activeTab === 'squads' && (
           <View>
             <View style={styles.sectionHeader}>
               <Text style={styles.sectionTitle}>Multi-Strategy Confluence Squads</Text>
-              <Text style={styles.sectionDesc}>High-probability consensus units executing on candle alignments</Text>
+              <Text style={styles.sectionDesc}>High-probability consensus units combining momentum, volume, and price action</Text>
             </View>
 
             {squads.map((sq) => (
               <SquadCard
                 key={sq.id}
                 squad={sq}
-                allStrategies={allStrategies}
+                allStrategies={strategies}
                 onToggle={handleToggleSquad}
               />
             ))}
           </View>
-        ) : (
+        )}
+
+        {/* TAB 3: STANDALONE STRATEGIES */}
+        {activeTab === 'strategies' && (
+          <View>
+            <View style={styles.sectionHeader}>
+              <Text style={styles.sectionTitle}>Individual Systematic Strategies</Text>
+              <Text style={styles.sectionDesc}>Manage operating modes and enable/disable individual quantitative engines</Text>
+            </View>
+
+            {strategies.map((st) => (
+              <StrategyCard
+                key={st.id}
+                strategy={st}
+                onToggle={handleToggleStrategy}
+              />
+            ))}
+          </View>
+        )}
+
+        {/* TAB 4: LIVE SIGNAL LOG */}
+        {activeTab === 'signals' && (
           <View>
             {/* Filter Pills and Clear Log */}
             <View style={styles.filterRow}>
@@ -180,7 +296,7 @@ export const AnalysisScreen: React.FC = () => {
               <View style={styles.emptyBox}>
                 <Activity size={32} color={COLORS.textSubtle} />
                 <Text style={styles.emptyTitle}>No signals recorded</Text>
-                <Text style={styles.emptyDesc}>Signals appear here during market hours (09:15 AM - 03:30 PM IST)</Text>
+                <Text style={styles.emptyDesc}>Signals appear here live during market hours (09:15 AM - 03:30 PM IST)</Text>
               </View>
             ) : (
               filteredSignals.map((sig) => (
@@ -199,31 +315,36 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: COLORS.bg,
   },
-  segmentContainer: {
-    flexDirection: 'row',
+  tabsScrollView: {
+    maxHeight: 56,
+    borderBottomWidth: 1,
+    borderBottomColor: COLORS.surfaceBorder,
     backgroundColor: COLORS.surface,
-    padding: 8,
-    marginHorizontal: 16,
-    marginVertical: 10,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: COLORS.surfaceBorder,
-    gap: 6,
   },
-  segmentBtn: {
-    flex: 1,
+  tabsContainer: {
+    flexDirection: 'row',
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    gap: 8,
+    alignItems: 'center',
+  },
+  tabBtn: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'center',
     gap: 6,
-    paddingVertical: 10,
-    borderRadius: 8,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: 10,
+    backgroundColor: COLORS.bg,
+    borderWidth: 1,
+    borderColor: COLORS.surfaceBorder,
   },
-  segmentActive: {
+  tabActive: {
     backgroundColor: COLORS.primary,
+    borderColor: COLORS.primary,
   },
-  segmentText: {
-    fontSize: 13,
+  tabText: {
+    fontSize: 12,
     fontWeight: '800',
     color: COLORS.textMuted,
   },
@@ -232,7 +353,8 @@ const styles = StyleSheet.create({
   },
   sectionHeader: {
     paddingHorizontal: 16,
-    paddingVertical: 8,
+    paddingTop: 12,
+    paddingBottom: 6,
   },
   sectionTitle: {
     fontSize: 15,
@@ -294,7 +416,7 @@ const styles = StyleSheet.create({
     borderRadius: 16,
     padding: 30,
     marginHorizontal: 16,
-    marginTop: 20,
+    marginTop: 16,
     alignItems: 'center',
     borderWidth: 1,
     borderColor: COLORS.surfaceBorder,
@@ -310,5 +432,6 @@ const styles = StyleSheet.create({
     color: COLORS.textMuted,
     textAlign: 'center',
     marginTop: 4,
+    lineHeight: 16,
   },
 });
