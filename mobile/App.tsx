@@ -15,11 +15,14 @@ import { WatchlistScreen } from './screens/WatchlistScreen';
 import { AnalysisScreen } from './screens/AnalysisScreen';
 import { PositionsScreen } from './screens/PositionsScreen';
 import { SettingsScreen } from './screens/SettingsScreen';
+import { LoginScreen } from './screens/LoginScreen';
 import { setupNotificationChannels, registerForPushNotificationsAsync } from './lib/notifications';
+import { getAuthToken, clearAuthToken } from './lib/auth';
 
 type TabName = 'dashboard' | 'watchlist' | 'analysis' | 'positions' | 'settings';
 
 export default function App() {
+  const [isAuthenticated, setIsAuthenticated] = useState<boolean | null>(null);
   const [activeTab, setActiveTab] = useState<TabName>('dashboard');
   const [spotData, setSpotData] = useState({ price: 24250, change: 0 });
   const [isEngineRunning, setIsEngineRunning] = useState(false);
@@ -27,6 +30,12 @@ export default function App() {
   useEffect(() => {
     setupNotificationChannels();
     registerForPushNotificationsAsync();
+
+    const checkAuth = async () => {
+      const token = await getAuthToken();
+      setIsAuthenticated(!!token);
+    };
+    checkAuth();
 
     const fetchEngineStatus = async () => {
       try {
@@ -104,6 +113,10 @@ export default function App() {
         return <SettingsScreen />;
     }
   };
+
+  if (isAuthenticated === false) {
+    return <LoginScreen onLoginSuccess={() => setIsAuthenticated(true)} />;
+  }
 
   return (
     <SafeAreaView style={styles.safeArea}>

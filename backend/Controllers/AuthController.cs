@@ -77,10 +77,53 @@ namespace StoicTrade.Api.Controllers
                 return StatusCode(500, new { Message = "Internal server error." });
             }
         }
+
+        [AllowAnonymous]
+        [HttpPost("pin-login")]
+        public IActionResult PinLogin([FromBody] PinLoginRequest request)
+        {
+            try
+            {
+                var expectedHash = _config["MASTER_PIN_HASH"] ?? "73575068bb4b3b7f4ccc6f6eada01a7e0bf61afea3d0ce77d64cb7d7284e11a8";
+                if (string.IsNullOrEmpty(request.PinHash) || request.PinHash.ToLowerInvariant() != expectedHash.ToLowerInvariant())
+                {
+                    _logger.LogWarning("Unauthorized PIN Login attempt.");
+                    return Unauthorized(new { Message = "Invalid Master PIN." });
+                }
+
+                // Generate system JWT token with 30-day lifespan for mobile sessions
+                var tokenHandler = new JwtSecurityTokenHandler();
+                var key = Encoding.UTF8.GetBytes(_config["JWT_SECRET"] ?? "super_secret_jwt_key_that_must_be_long_enough_for_hmac_sha256");
+                var tokenDescriptor = new SecurityTokenDescriptor
+                {
+                    Subject = new ClaimsIdentity(new[] 
+                    { 
+                        new Claim(ClaimTypes.Name, "StoicTrader Admin"),
+                        new Claim(ClaimTypes.Role, "Admin")
+                    }),
+                    Expires = DateTime.UtcNow.AddDays(30),
+                    SigningCredentials = new SigningCredentials(new SymmetricSecurityKey(key), SecurityAlgorithms.HmacSha256Signature)
+                };
+                var token = tokenHandler.CreateToken(tokenDescriptor);
+                var tokenString = tokenHandler.WriteToken(token);
+
+                return Ok(new { Token = tokenString });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error during PIN login.");
+                return StatusCode(500, new { Message = "Internal server error." });
+            }
+        }
     }
 
     public class GoogleLoginRequest
     {
         public string Token { get; set; } = string.Empty;
+    }
+
+    public class PinLoginRequest
+    {
+        public string PinHash { get; set; } = string.Empty;
     }
 }
