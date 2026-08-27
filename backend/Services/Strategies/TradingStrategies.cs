@@ -182,7 +182,7 @@ namespace StoicTrade.Api.Services.Strategies
                 {
                     StrategyName = Name,
                     Instrument = "NIFTY",
-                    Action = "SELL",
+                    Action = "EXIT",
                     Quantity = 65,
                     OrderType = "MARKET",
                     Price = lastCandle.Close,
@@ -283,7 +283,7 @@ namespace StoicTrade.Api.Services.Strategies
                 {
                     StrategyName = Name,
                     Instrument = "NIFTY",
-                    Action = "SELL",
+                    Action = "EXIT",
                     Quantity = 65,
                     OrderType = "MARKET",
                     Price = lastCandle.Close,
@@ -380,7 +380,7 @@ namespace StoicTrade.Api.Services.Strategies
                 {
                     StrategyName = Name,
                     Instrument = "NIFTY",
-                    Action = "SELL",
+                    Action = "EXIT",
                     Quantity = 65,
                     OrderType = "MARKET",
                     Price = lastCandle.Close,
@@ -470,7 +470,7 @@ namespace StoicTrade.Api.Services.Strategies
                 {
                     StrategyName = Name,
                     Instrument = "NIFTY",
-                    Action = "SELL",
+                    Action = "EXIT",
                     Quantity = 65,
                     OrderType = "MARKET",
                     Price = lastCandle.Close,
@@ -550,7 +550,7 @@ namespace StoicTrade.Api.Services.Strategies
                 {
                     StrategyName = Name,
                     Instrument = "NIFTY",
-                    Action = "SELL",
+                    Action = "EXIT",
                     Quantity = 65,
                     OrderType = "MARKET",
                     Price = currentCandle.Close,
@@ -641,7 +641,7 @@ namespace StoicTrade.Api.Services.Strategies
                 {
                     StrategyName = Name,
                     Instrument = "NIFTY",
-                    Action = "SELL",
+                    Action = "EXIT",
                     Quantity = 65,
                     OrderType = "MARKET",
                     Price = lastCandle.Close,
@@ -728,7 +728,7 @@ namespace StoicTrade.Api.Services.Strategies
                 {
                     StrategyName = Name,
                     Instrument = "NIFTY",
-                    Action = "SELL",
+                    Action = "EXIT",
                     Quantity = 65,
                     OrderType = "MARKET",
                     Price = lastCandle.Close,
@@ -821,7 +821,7 @@ namespace StoicTrade.Api.Services.Strategies
                 {
                     StrategyName = Name,
                     Instrument = "NIFTY",
-                    Action = "SELL",
+                    Action = "EXIT",
                     Quantity = 65,
                     OrderType = "MARKET",
                     Price = lastCandle.Close,

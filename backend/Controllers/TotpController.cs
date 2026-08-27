@@ -62,13 +62,15 @@ namespace StoicTrade.Api.Controllers
                 var reqTimeStr = await _redisService.GetValueAsync($"totp_req:{accountId}");
                 if (string.IsNullOrEmpty(reqTimeStr) || !long.TryParse(reqTimeStr, out long reqTimeUnix))
                 {
-                    return BadRequest(new { Error = "No TOTP request found. Please call /api/totp/request first." });
+                    return BadRequest(new { Error = "Kill Switch is ACTIVE on this account. Please click 'Request Manual Access' first to start the 20-minute behavioral cooling period." });
                 }
 
                 var reqTime = DateTimeOffset.FromUnixTimeSeconds(reqTimeUnix).UtcDateTime;
-                if ((DateTime.UtcNow - reqTime).TotalMinutes < 20)
+                var elapsedMinutes = (DateTime.UtcNow - reqTime).TotalMinutes;
+                if (elapsedMinutes < 20)
                 {
-                    return BadRequest(new { Error = "Cooling period active. Please wait 20 minutes from the time of request." });
+                    int remainingMinutes = (int)Math.Ceiling(20 - elapsedMinutes);
+                    return BadRequest(new { Error = $"Cooling period active. Please wait {remainingMinutes} more minute(s) before generating TOTP." });
                 }
             }
 

@@ -19,15 +19,17 @@ namespace StoicTrade.Api.Services.Strategies
     {
         public string Id { get; set; } = Guid.NewGuid().ToString();
         public string StrategyName { get; set; } = string.Empty;
-        public string Action { get; set; } = string.Empty;   // BUY | SELL
+        public string Action { get; set; } = string.Empty;   // BUY | SELL | EXIT
         public string Instrument { get; set; } = string.Empty;
         public decimal Price { get; set; }
         public decimal TargetPrice { get; set; }
         public decimal StopLossPrice { get; set; }
         public int Quantity { get; set; }
-        /// <summary>AutoExecuted | AwaitingApproval | SignalOnly | Blocked</summary>
+        /// <summary>AutoExecuted | AwaitingApproval | SignalOnly | Blocked | ExitSignal</summary>
         public string Status { get; set; } = string.Empty;
         public DateTime GeneratedAt { get; set; } = DateTime.UtcNow;
+        public DateTime ExpiresAt { get; set; } = DateTime.UtcNow.AddMinutes(15);
+        public bool IsActive => DateTime.UtcNow <= ExpiresAt;
     }
 
     public class StrategyEngineService : BackgroundService
@@ -151,10 +153,32 @@ namespace StoicTrade.Api.Services.Strategies
                             var signal = await strategy.ExecuteAsync(config, marketDataJson);
                             if (signal != null)
                             {
+                                // If position exit signal, log exit and do not buy PE
+                                if (signal.Action == "EXIT")
+                                {
+                                    if (!IsInCooldown(signal.StrategyName))
+                                    {
+                                        AddToSignalLog(new SignalLogEntry
+                                        {
+                                            StrategyName = signal.StrategyName,
+                                            Action = "EXIT",
+                                            Instrument = signal.Instrument,
+                                            Price = signal.Price,
+                                            TargetPrice = 0,
+                                            StopLossPrice = 0,
+                                            Quantity = signal.Quantity,
+                                            Status = "ExitSignal",
+                                            GeneratedAt = DateTime.UtcNow,
+                                            ExpiresAt = DateTime.UtcNow.AddMinutes(15)
+                                        });
+                                    }
+                                    continue;
+                                }
+
                                 // If signal is for NIFTY underlying, select the optimal 2nd weekly ITM option contract
                                 if (signal.Instrument == "NIFTY" || (!signal.Instrument.Contains("CE") && !signal.Instrument.Contains("PE")))
                                 {
-                                    string bias = signal.Action == "BUY" ? "BULLISH" : "BEARISH";
+                                    string bias = (signal.Action == "BUY") ? "BULLISH" : "BEARISH";
                                     var contract = optionEngine.GetOptimalContract("NIFTY", bias, itmDistance: 1, expiryIndex: 1)
                                         ?? optionEngine.GetOptimalContract("NIFTY", bias, itmDistance: 1, expiryIndex: 0);
                                     if (!string.IsNullOrEmpty(contract))
@@ -180,7 +204,7 @@ namespace StoicTrade.Api.Services.Strategies
                                 }
 
                                 // Anti-Spam / Cooldown Check: avoid repeating the same strategy signal within cooldown window
-                                if (!IsInCooldown(signal.StrategyName, signal.Instrument, signal.Action))
+                                if (!IsInCooldown(signal.StrategyName))
                                 {
                                     tickSignals.Add(signal);
                                     // Determine log status based on operating mode
@@ -201,7 +225,8 @@ namespace StoicTrade.Api.Services.Strategies
                                         StopLossPrice = signal.StopLossPrice,
                                         Quantity = signal.Quantity,
                                         Status = logStatus,
-                                        GeneratedAt = DateTime.UtcNow
+                                        GeneratedAt = DateTime.UtcNow,
+                                        ExpiresAt = DateTime.UtcNow.AddMinutes(15)
                                     });
                                 }
                             }
@@ -231,7 +256,7 @@ namespace StoicTrade.Api.Services.Strategies
                             if (memberStrategy != null)
                             {
                                 var memberSig = await memberStrategy.ExecuteAsync(memberConfig, marketDataJson);
-                                if (memberSig != null) groupMemberSignals.Add(memberSig);
+                                if (memberSig != null && memberSig.Action != "EXIT") groupMemberSignals.Add(memberSig);
                             }
                         }
 
@@ -239,7 +264,7 @@ namespace StoicTrade.Api.Services.Strategies
 
                         // Consensus evaluation
                         var buyVotes = groupMemberSignals.Count(s => s.Action == "BUY");
-                        var sellVotes = groupMemberSignals.Count(s => s.Action == "SELL");
+                        var sellVotes = groupMemberSignals.Count(s => s.Action == "SELL" || s.Action == "SHORT");
                         int requiredVotes = group.ConsensusRule switch
                         {
                             "Unanimous" => memberIds.Count,
@@ -254,7 +279,7 @@ namespace StoicTrade.Api.Services.Strategies
 
                         if (!string.IsNullOrEmpty(consensusAction))
                         {
-                            var leaderSignal = groupMemberSignals.First(s => s.Action == consensusAction);
+                            var leaderSignal = groupMemberSignals.First(s => s.Action == (consensusAction == "BUY" ? "BUY" : (groupMemberSignals.Any(x => x.Action == "SHORT") ? "SHORT" : "SELL")));
                             var groupSignal = new Signal
                             {
                                 StrategyName = $"Group: {group.Name} ({buyVotes + sellVotes}/{memberIds.Count} Agree)",
@@ -293,7 +318,7 @@ namespace StoicTrade.Api.Services.Strategies
                             }
 
                             // Anti-Spam / Cooldown Check for Squad signals
-                            if (!IsInCooldown(groupSignal.StrategyName, groupSignal.Instrument, groupSignal.Action))
+                            if (!IsInCooldown(groupSignal.StrategyName))
                             {
                                 tickSignals.Add(groupSignal);
 
@@ -314,7 +339,8 @@ namespace StoicTrade.Api.Services.Strategies
                                     StopLossPrice = groupSignal.StopLossPrice,
                                     Quantity = groupSignal.Quantity,
                                     Status = logStatus,
-                                    GeneratedAt = DateTime.UtcNow
+                                    GeneratedAt = DateTime.UtcNow,
+                                    ExpiresAt = DateTime.UtcNow.AddMinutes(15)
                                 });
                             }
                         }
@@ -349,9 +375,9 @@ namespace StoicTrade.Api.Services.Strategies
             _logger.LogInformation("Strategy Engine is stopping.");
         }
 
-        private static bool IsInCooldown(string strategyName, string instrument, string action)
+        private static bool IsInCooldown(string strategyName)
         {
-            string key = $"{strategyName}:{instrument}:{action}";
+            string key = strategyName;
             if (_lastSignalEmissionTime.TryGetValue(key, out var lastTime))
             {
                 if (DateTime.UtcNow - lastTime < SignalCooldown)

@@ -164,6 +164,43 @@ export default function Dashboard() {
     }
   };
 
+  const handleEmergencySquareOff = async () => {
+    if (!confirm("⚠ Are you sure you want to EMERGENCY SQUARE OFF all open positions? This will send market exit orders for all paper and live trades immediately.")) {
+      return;
+    }
+    try {
+      const res = await fetchWithAuth("/api/engine/squareoff", { method: "POST" });
+      const data = await res.json();
+      if (res.ok) {
+        alert(data.message || data.Message || "Emergency square-off executed successfully.");
+      } else {
+        alert(data.error || "Failed to trigger emergency square-off.");
+      }
+    } catch (err) {
+      console.error(err);
+      alert("Network error triggering emergency square-off.");
+    }
+  };
+
+  const handleStopNewTrades = async () => {
+    if (!confirm("Are you sure you want to STOP NEW TRADES? This will pause the Strategy Engine from taking new entries.")) {
+      return;
+    }
+    try {
+      const res = await fetchWithAuth("/api/engine/stop", { method: "POST" });
+      const data = await res.json();
+      if (res.ok) {
+        setIsEngineRunning(false);
+        alert("Strategy Engine stopped. No new trades will be initiated.");
+      } else {
+        alert(data.error || "Failed to stop new trades.");
+      }
+    } catch (err) {
+      console.error(err);
+      alert("Network error stopping engine.");
+    }
+  };
+
   return (
     <div className="p-6 md:p-10 max-w-7xl mx-auto space-y-8">
       <header className="flex flex-col md:flex-row md:items-center justify-between gap-4">
@@ -182,7 +219,8 @@ export default function Dashboard() {
           </button>
           
           <button 
-            className="flex items-center gap-2 px-6 py-3 rounded-lg font-bold text-white shadow-lg transition-all bg-orange-500 hover:bg-orange-600"
+            onClick={handleStopNewTrades}
+            className="flex items-center gap-2 px-6 py-3 rounded-lg font-bold text-white shadow-lg transition-all bg-orange-500 hover:bg-orange-600 active:scale-95"
           >
             STOP NEW TRADES
           </button>
@@ -199,7 +237,8 @@ export default function Dashboard() {
           </button>
 
           <button 
-            className="flex items-center gap-2 px-6 py-3 rounded-lg font-bold text-white shadow-lg transition-all bg-red-700 hover:bg-red-800"
+            onClick={handleEmergencySquareOff}
+            className="flex items-center gap-2 px-6 py-3 rounded-lg font-bold text-white shadow-lg transition-all bg-red-700 hover:bg-red-800 active:scale-95"
           >
             ⚠ EMERGENCY SQUARE OFF ALL
           </button>

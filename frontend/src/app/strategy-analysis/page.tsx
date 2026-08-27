@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import {
   Activity, Zap, Shield, Radar, BarChart2, CheckCircle2, XCircle,
   TrendingUp, TrendingDown, Clock, RefreshCcw, ChevronDown, ChevronUp,
-  Layers, Users, CheckSquare, Trash2, Calendar
+  Layers, Users, CheckSquare, Trash2, Calendar, LogOut
 } from "lucide-react";
 import { fetchWithAuth } from "@/lib/api";
 
@@ -43,8 +43,9 @@ interface SignalLogEntry {
   targetPrice?: number;
   stopLossPrice?: number;
   quantity: number;
-  status: string; // AutoExecuted | AwaitingApproval | SignalOnly | Blocked
+  status: string; // AutoExecuted | AwaitingApproval | SignalOnly | Blocked | ExitSignal
   generatedAt: string;
+  expiresAt?: string;
 }
 
 interface PendingApproval {
@@ -98,6 +99,7 @@ const STATUS_META: Record<string, { label: string; class: string }> = {
   AwaitingApproval: { label: "Awaiting Approval", class: "bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400" },
   SignalOnly:       { label: "Signal Only",        class: "bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-400" },
   Blocked:          { label: "Blocked",            class: "bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400" },
+  ExitSignal:       { label: "Position Exit",      class: "bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400" },
 };
 
 // ─── Component ────────────────────────────────────────────────────────────────
@@ -805,9 +807,11 @@ export default function StrategyAnalysisPage() {
                             <span className={`px-2.5 py-1 text-xs font-bold rounded-md flex items-center gap-1 w-fit ${
                               entry.action === "BUY"
                                 ? "bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400"
+                                : entry.action === "EXIT"
+                                ? "bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400"
                                 : "bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400"
                             }`}>
-                              {entry.action === "BUY" ? <TrendingUp className="w-3 h-3" /> : <TrendingDown className="w-3 h-3" />}
+                              {entry.action === "BUY" ? <TrendingUp className="w-3 h-3" /> : entry.action === "EXIT" ? <LogOut className="w-3 h-3" /> : <TrendingDown className="w-3 h-3" />}
                               {entry.action}
                             </span>
                           </td>
@@ -821,9 +825,20 @@ export default function StrategyAnalysisPage() {
                           </td>
                           <td className="p-4 text-right text-slate-600 dark:text-slate-400">{entry.quantity}</td>
                           <td className="p-4">
-                            <span className={`px-2.5 py-1 text-xs font-bold rounded-md ${statusMeta.class}`}>
-                              {statusMeta.label}
-                            </span>
+                            <div className="flex flex-col gap-1">
+                              <span className={`px-2.5 py-0.5 text-xs font-bold rounded-md ${statusMeta.class}`}>
+                                {statusMeta.label}
+                              </span>
+                              {entry.status !== "ExitSignal" && (
+                                <span className={`text-[10px] font-semibold px-1.5 py-0.2 rounded w-fit ${
+                                  entry.expiresAt && new Date(entry.expiresAt).getTime() > Date.now()
+                                    ? "text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/40"
+                                    : "text-slate-400 dark:text-slate-500 bg-slate-100 dark:bg-slate-800"
+                                }`}>
+                                  {entry.expiresAt && new Date(entry.expiresAt).getTime() > Date.now() ? "Active" : "Expired"}
+                                </span>
+                              )}
+                            </div>
                           </td>
                         </tr>
                       );
