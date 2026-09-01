@@ -428,6 +428,8 @@ namespace StoicTrade.Api.Services.Strategies
             if (lastFast.Ema == null || lastSlow.Ema == null) return null;
 
             string stateKey = $"strategy_state_{config.Id}";
+            var currentState = await _redis.GetValueAsync(stateKey) ?? "Idle";
+            
             // Handle legacy state for backward compatibility
             if (currentState == "InPosition") currentState = "InPosition_Long";
 
