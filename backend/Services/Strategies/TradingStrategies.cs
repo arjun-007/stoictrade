@@ -143,39 +143,89 @@ namespace StoicTrade.Api.Services.Strategies
                                     prevCandle.Close > (decimal)prevSt.SuperTrend &&
                                     lastCandle.Close > (decimal)lastSt.SuperTrend;
 
-            if (currentState == "Idle" && (consecutiveGreen || lastCandle.Close > (decimal)lastSt.SuperTrend))
+            bool consecutiveRed = prevCandle != null && prevSt != null && prevSt.SuperTrend != null &&
+                                  prevCandle.Close < (decimal)prevSt.SuperTrend &&
+                                  lastCandle.Close < (decimal)lastSt.SuperTrend;
+
+            // Handle legacy "InPosition" as "InPosition_Long" for backward compatibility
+            if (currentState == "InPosition") currentState = "InPosition_Long";
+
+            if (currentState == "Idle")
             {
-                decimal rvol = StrategyFilterHelper.CalculateRvol(candles);
-                if (StrategyFilterHelper.IsMiddayChopHours() && rvol < 2.0m)
-                    return null;
+                // BULLISH ENTRY
+                if (consecutiveGreen || lastCandle.Close > (decimal)lastSt.SuperTrend)
+                {
+                    decimal rvol = StrategyFilterHelper.CalculateRvol(candles);
+                    if (StrategyFilterHelper.IsMiddayChopHours() && rvol < 2.0m) return null;
+                    if (!StrategyFilterHelper.CheckHtfGate(_aggregator, "BUY")) return null;
+                    if (useOptionGate && !StrategyFilterHelper.CheckInstitutionalGate(_optionChain, lastCandle.Close, "BUY")) return null;
 
-                if (!StrategyFilterHelper.CheckHtfGate(_aggregator, "BUY"))
-                    return null;
+                    decimal atr = StrategyFilterHelper.CalculateAtr(candles);
+                    decimal sl = Math.Round(lastCandle.Close - (1.0m * atr), 2);
+                    decimal target = Math.Round(lastCandle.Close + (1.8m * atr), 2);
 
-                if (useOptionGate && !StrategyFilterHelper.CheckInstitutionalGate(_optionChain, lastCandle.Close, "BUY"))
-                    return null;
+                    await _redis.SetValueAsync(stateKey, "InPosition_Long", TimeSpan.FromHours(8));
+                    return new Signal
+                    {
+                        StrategyName = Name,
+                        Instrument = "NIFTY",
+                        Action = "BUY",
+                        Quantity = 65,
+                        OrderType = "MARKET",
+                        Price = lastCandle.Close,
+                        StopLossPrice = sl,
+                        TargetPrice = target,
+                        Atr = atr,
+                        Rvol = rvol,
+                        Priority = 2
+                    };
+                }
+                // BEARISH ENTRY (PE)
+                else if (consecutiveRed || lastCandle.Close < (decimal)lastSt.SuperTrend)
+                {
+                    decimal rvol = StrategyFilterHelper.CalculateRvol(candles);
+                    if (StrategyFilterHelper.IsMiddayChopHours() && rvol < 2.0m) return null;
+                    if (!StrategyFilterHelper.CheckHtfGate(_aggregator, "SELL")) return null;
+                    if (useOptionGate && !StrategyFilterHelper.CheckInstitutionalGate(_optionChain, lastCandle.Close, "SELL")) return null;
 
-                decimal atr = StrategyFilterHelper.CalculateAtr(candles);
-                decimal sl = Math.Round(lastCandle.Close - (1.0m * atr), 2);
-                decimal target = Math.Round(lastCandle.Close + (1.8m * atr), 2);
+                    decimal atr = StrategyFilterHelper.CalculateAtr(candles);
+                    decimal sl = Math.Round(lastCandle.Close + (1.0m * atr), 2); // SL is above
+                    decimal target = Math.Round(lastCandle.Close - (1.8m * atr), 2); // Target is below
 
-                await _redis.SetValueAsync(stateKey, "InPosition", TimeSpan.FromHours(8));
+                    await _redis.SetValueAsync(stateKey, "InPosition_Short", TimeSpan.FromHours(8));
+                    return new Signal
+                    {
+                        StrategyName = Name,
+                        Instrument = "NIFTY",
+                        Action = "BUY_PE",
+                        Quantity = 65,
+                        OrderType = "MARKET",
+                        Price = lastCandle.Close,
+                        StopLossPrice = sl,
+                        TargetPrice = target,
+                        Atr = atr,
+                        Rvol = rvol,
+                        Priority = 2
+                    };
+                }
+            }
+            // EXIT LONG
+            else if (currentState == "InPosition_Long" && lastCandle.Close < (decimal)lastSt.SuperTrend)
+            {
+                await _redis.DeleteKeyAsync(stateKey);
                 return new Signal
                 {
                     StrategyName = Name,
                     Instrument = "NIFTY",
-                    Action = "BUY",
+                    Action = "EXIT",
                     Quantity = 65,
                     OrderType = "MARKET",
                     Price = lastCandle.Close,
-                    StopLossPrice = sl,
-                    TargetPrice = target,
-                    Atr = atr,
-                    Rvol = rvol,
                     Priority = 2
                 };
             }
-            else if (currentState == "InPosition" && lastCandle.Close < (decimal)lastSt.SuperTrend)
+            // EXIT SHORT
+            else if (currentState == "InPosition_Short" && lastCandle.Close > (decimal)lastSt.SuperTrend)
             {
                 await _redis.DeleteKeyAsync(stateKey);
                 return new Signal
@@ -239,6 +289,9 @@ namespace StoicTrade.Api.Services.Strategies
             string stateKey = $"strategy_state_{config.Id}";
             var currentState = await _redis.GetValueAsync(stateKey) ?? "Idle";
 
+            // Handle legacy state for backward compatibility
+            if (currentState == "InPosition") currentState = "InPosition_Long";
+
             if (currentState == "Idle")
             {
                 decimal rvol = StrategyFilterHelper.CalculateRvol(todayCandles, 10);
@@ -247,13 +300,11 @@ namespace StoicTrade.Api.Services.Strategies
                 if (StrategyFilterHelper.IsMiddayChopHours() && rvol < 2.5m)
                     return null;
 
+                // BULLISH ENTRY
                 if (lastCandle.Close > orbHigh && (!useVwap || lastCandle.Close > vwap))
                 {
-                    if (!StrategyFilterHelper.CheckHtfGate(_aggregator, "BUY"))
-                        return null;
-
-                    if (useOptionGate && !StrategyFilterHelper.CheckInstitutionalGate(_optionChain, lastCandle.Close, "BUY"))
-                        return null;
+                    if (!StrategyFilterHelper.CheckHtfGate(_aggregator, "BUY")) return null;
+                    if (useOptionGate && !StrategyFilterHelper.CheckInstitutionalGate(_optionChain, lastCandle.Close, "BUY")) return null;
 
                     decimal atr = StrategyFilterHelper.CalculateAtr(candles);
                     decimal sl = orbLow > 0 ? orbLow : Math.Round(lastCandle.Close - (1.0m * atr), 2);
@@ -275,8 +326,50 @@ namespace StoicTrade.Api.Services.Strategies
                         Priority = 3
                     };
                 }
+                // BEARISH ENTRY (PE)
+                else if (lastCandle.Close < orbLow && (!useVwap || lastCandle.Close < vwap))
+                {
+                    if (!StrategyFilterHelper.CheckHtfGate(_aggregator, "SELL")) return null;
+                    if (useOptionGate && !StrategyFilterHelper.CheckInstitutionalGate(_optionChain, lastCandle.Close, "SELL")) return null;
+
+                    decimal atr = StrategyFilterHelper.CalculateAtr(candles);
+                    decimal sl = orbHigh > 0 ? orbHigh : Math.Round(lastCandle.Close + (1.0m * atr), 2); // SL is above
+                    decimal target = Math.Round(lastCandle.Close - (1.8m * atr), 2); // Target is below
+
+                    await _redis.SetValueAsync(stateKey, "InPosition_Short", TimeSpan.FromHours(8));
+                    return new Signal
+                    {
+                        StrategyName = Name,
+                        Instrument = "NIFTY",
+                        Action = "BUY_PE",
+                        Quantity = 65,
+                        OrderType = "MARKET",
+                        Price = lastCandle.Close,
+                        StopLossPrice = sl,
+                        TargetPrice = target,
+                        Atr = atr,
+                        Rvol = rvol,
+                        Priority = 3
+                    };
+                }
             }
+            // EXIT LONG
             else if (currentState == "InPosition_Long" && lastCandle.Close < orbLow)
+            {
+                await _redis.DeleteKeyAsync(stateKey);
+                return new Signal
+                {
+                    StrategyName = Name,
+                    Instrument = "NIFTY",
+                    Action = "EXIT",
+                    Quantity = 65,
+                    OrderType = "MARKET",
+                    Price = lastCandle.Close,
+                    Priority = 3
+                };
+            }
+            // EXIT SHORT
+            else if (currentState == "InPosition_Short" && lastCandle.Close > orbHigh)
             {
                 await _redis.DeleteKeyAsync(stateKey);
                 return new Signal
@@ -335,11 +428,13 @@ namespace StoicTrade.Api.Services.Strategies
             if (lastFast.Ema == null || lastSlow.Ema == null) return null;
 
             string stateKey = $"strategy_state_{config.Id}";
-            var currentState = await _redis.GetValueAsync(stateKey) ?? "Idle";
+            // Handle legacy state for backward compatibility
+            if (currentState == "InPosition") currentState = "InPosition_Long";
 
-            if (currentState == "Idle" && lastFast.Ema > lastSlow.Ema)
+            if (currentState == "Idle")
             {
-                if (lastCandle.Low <= (decimal)lastFast.Ema && lastCandle.Close > (decimal)lastFast.Ema)
+                // BULLISH ENTRY
+                if (lastFast.Ema > lastSlow.Ema && lastCandle.Low <= (decimal)lastFast.Ema && lastCandle.Close > (decimal)lastFast.Ema)
                 {
                     if (StrategyFilterHelper.IsMiddayChopHours()) return null;
                     if (!StrategyFilterHelper.CheckHtfGate(_aggregator, "BUY")) return null;
@@ -356,7 +451,7 @@ namespace StoicTrade.Api.Services.Strategies
                     decimal target = Math.Round(lastCandle.Close + (1.8m * atr), 2);
                     decimal rvol = StrategyFilterHelper.CalculateRvol(candles);
 
-                    await _redis.SetValueAsync(stateKey, "InPosition", TimeSpan.FromHours(8));
+                    await _redis.SetValueAsync(stateKey, "InPosition_Long", TimeSpan.FromHours(8));
                     return new Signal
                     {
                         StrategyName = Name,
@@ -372,8 +467,58 @@ namespace StoicTrade.Api.Services.Strategies
                         Priority = 1
                     };
                 }
+                // BEARISH ENTRY (PE)
+                else if (lastFast.Ema < lastSlow.Ema && lastCandle.High >= (decimal)lastFast.Ema && lastCandle.Close < (decimal)lastFast.Ema)
+                {
+                    if (StrategyFilterHelper.IsMiddayChopHours()) return null;
+                    if (!StrategyFilterHelper.CheckHtfGate(_aggregator, "SELL")) return null;
+
+                    if (checkFvg)
+                    {
+                        var activeFvgs = SmartMoneyStructureHelper.DetectFairValueGaps(candles);
+                        bool isNearFvg = activeFvgs.Any(g => !g.IsBullish && Math.Abs(lastCandle.High - g.Equilibrium) <= 15m);
+                        if (!isNearFvg) return null;
+                    }
+
+                    decimal atr = StrategyFilterHelper.CalculateAtr(candles);
+                    decimal sl = Math.Round(lastCandle.Close + (1.0m * atr), 2);
+                    decimal target = Math.Round(lastCandle.Close - (1.8m * atr), 2);
+                    decimal rvol = StrategyFilterHelper.CalculateRvol(candles);
+
+                    await _redis.SetValueAsync(stateKey, "InPosition_Short", TimeSpan.FromHours(8));
+                    return new Signal
+                    {
+                        StrategyName = Name,
+                        Instrument = "NIFTY",
+                        Action = "BUY_PE",
+                        Quantity = 65,
+                        OrderType = "MARKET",
+                        Price = lastCandle.Close,
+                        StopLossPrice = sl,
+                        TargetPrice = target,
+                        Atr = atr,
+                        Rvol = rvol,
+                        Priority = 1
+                    };
+                }
             }
-            else if (currentState == "InPosition" && lastCandle.Close < (decimal)lastSlow.Ema)
+            // EXIT LONG
+            else if (currentState == "InPosition_Long" && lastCandle.Close < (decimal)lastSlow.Ema)
+            {
+                await _redis.DeleteKeyAsync(stateKey);
+                return new Signal
+                {
+                    StrategyName = Name,
+                    Instrument = "NIFTY",
+                    Action = "EXIT",
+                    Quantity = 65,
+                    OrderType = "MARKET",
+                    Price = lastCandle.Close,
+                    Priority = 1
+                };
+            }
+            // EXIT SHORT
+            else if (currentState == "InPosition_Short" && lastCandle.Close > (decimal)lastSlow.Ema)
             {
                 await _redis.DeleteKeyAsync(stateKey);
                 return new Signal
@@ -427,43 +572,98 @@ namespace StoicTrade.Api.Services.Strategies
             string stateKey = $"strategy_state_{config.Id}";
             var currentState = await _redis.GetValueAsync(stateKey) ?? "Idle";
 
-            bool solidBodyBreakout = lastCandle.Close > (decimal)lastBb.UpperBand && lastCandle.Open >= (decimal)lastBb.Sma;
+            // Handle legacy state for backward compatibility
+            if (currentState == "InPosition") currentState = "InPosition_Long";
 
-            if (currentState == "Idle" && solidBodyBreakout)
+            bool solidBodyBreakoutBullish = lastCandle.Close > (decimal)lastBb.UpperBand && lastCandle.Open >= (decimal)lastBb.Sma;
+            bool solidBodyBreakoutBearish = lastCandle.Close < (decimal)lastBb.LowerBand && lastCandle.Open <= (decimal)lastBb.Sma;
+
+            if (currentState == "Idle")
             {
                 decimal rvol = StrategyFilterHelper.CalculateRvol(candles);
                 if (rvol < 1.5m) return null;
-
                 if (StrategyFilterHelper.IsMiddayChopHours() && rvol < 2.5m) return null;
-                if (!StrategyFilterHelper.CheckHtfGate(_aggregator, "BUY")) return null;
 
-                if (usePocGate)
+                // BULLISH ENTRY
+                if (solidBodyBreakoutBullish)
                 {
-                    var vp = SmartMoneyStructureHelper.CalculateVolumeProfile(candles);
-                    if (!vp.IsPriceAbovePoc) return null; // Reject if breakout hasn't accepted above POC
+                    if (!StrategyFilterHelper.CheckHtfGate(_aggregator, "BUY")) return null;
+
+                    if (usePocGate)
+                    {
+                        var vp = SmartMoneyStructureHelper.CalculateVolumeProfile(candles);
+                        if (!vp.IsPriceAbovePoc) return null; // Reject if breakout hasn't accepted above POC
+                    }
+
+                    decimal atr = StrategyFilterHelper.CalculateAtr(candles);
+                    decimal sl = Math.Round(lastCandle.Close - (1.0m * atr), 2);
+                    decimal target = Math.Round(lastCandle.Close + (1.8m * atr), 2);
+
+                    await _redis.SetValueAsync(stateKey, "InPosition_Long", TimeSpan.FromHours(8));
+                    return new Signal
+                    {
+                        StrategyName = Name,
+                        Instrument = "NIFTY",
+                        Action = "BUY",
+                        Quantity = 65,
+                        OrderType = "MARKET",
+                        Price = lastCandle.Close,
+                        StopLossPrice = sl,
+                        TargetPrice = target,
+                        Atr = atr,
+                        Rvol = rvol,
+                        Priority = 2
+                    };
                 }
+                // BEARISH ENTRY (PE)
+                else if (solidBodyBreakoutBearish)
+                {
+                    if (!StrategyFilterHelper.CheckHtfGate(_aggregator, "SELL")) return null;
 
-                decimal atr = StrategyFilterHelper.CalculateAtr(candles);
-                decimal sl = Math.Round(lastCandle.Close - (1.0m * atr), 2);
-                decimal target = Math.Round(lastCandle.Close + (1.8m * atr), 2);
+                    if (usePocGate)
+                    {
+                        var vp = SmartMoneyStructureHelper.CalculateVolumeProfile(candles);
+                        if (vp.IsPriceAbovePoc) return null; // Reject if breakdown is above POC
+                    }
 
-                await _redis.SetValueAsync(stateKey, "InPosition", TimeSpan.FromHours(8));
+                    decimal atr = StrategyFilterHelper.CalculateAtr(candles);
+                    decimal sl = Math.Round(lastCandle.Close + (1.0m * atr), 2); // SL is above
+                    decimal target = Math.Round(lastCandle.Close - (1.8m * atr), 2); // Target is below
+
+                    await _redis.SetValueAsync(stateKey, "InPosition_Short", TimeSpan.FromHours(8));
+                    return new Signal
+                    {
+                        StrategyName = Name,
+                        Instrument = "NIFTY",
+                        Action = "BUY_PE",
+                        Quantity = 65,
+                        OrderType = "MARKET",
+                        Price = lastCandle.Close,
+                        StopLossPrice = sl,
+                        TargetPrice = target,
+                        Atr = atr,
+                        Rvol = rvol,
+                        Priority = 2
+                    };
+                }
+            }
+            // EXIT LONG
+            else if (currentState == "InPosition_Long" && lastCandle.Close < (decimal)lastBb.Sma)
+            {
+                await _redis.DeleteKeyAsync(stateKey);
                 return new Signal
                 {
                     StrategyName = Name,
                     Instrument = "NIFTY",
-                    Action = "BUY",
+                    Action = "EXIT",
                     Quantity = 65,
                     OrderType = "MARKET",
                     Price = lastCandle.Close,
-                    StopLossPrice = sl,
-                    TargetPrice = target,
-                    Atr = atr,
-                    Rvol = rvol,
                     Priority = 2
                 };
             }
-            else if (currentState == "InPosition" && lastCandle.Close < (decimal)lastBb.Sma)
+            // EXIT SHORT
+            else if (currentState == "InPosition_Short" && lastCandle.Close > (decimal)lastBb.Sma)
             {
                 await _redis.DeleteKeyAsync(stateKey);
                 return new Signal
@@ -506,6 +706,9 @@ namespace StoicTrade.Api.Services.Strategies
             string stateKey = $"strategy_state_{config.Id}";
             var currentState = await _redis.GetValueAsync(stateKey) ?? "Idle";
 
+            // Handle legacy state for backward compatibility
+            if (currentState == "InPosition") currentState = "InPosition_Long";
+
             var last7 = candles.Skip(candles.Count - 8).Take(7).ToList();
             var ranges = last7.Select(c => c.High - c.Low).ToList();
             
@@ -515,35 +718,80 @@ namespace StoicTrade.Api.Services.Strategies
             
             var currentCandle = candles.Last();
 
-            if (currentState == "Idle" && isNr7 && currentCandle.Close > nr7High)
+            if (currentState == "Idle" && isNr7)
             {
                 decimal rvol = StrategyFilterHelper.CalculateRvol(candles);
                 if (rvol < 1.5m) return null;
-
                 if (StrategyFilterHelper.IsMiddayChopHours() && rvol < 2.5m) return null;
-                if (!StrategyFilterHelper.CheckHtfGate(_aggregator, "BUY")) return null;
 
-                decimal atr = StrategyFilterHelper.CalculateAtr(candles);
-                decimal sl = nr7Low > 0 ? nr7Low : Math.Round(currentCandle.Close - (1.0m * atr), 2);
-                decimal target = Math.Round(currentCandle.Close + (1.8m * atr), 2);
+                // BULLISH ENTRY
+                if (currentCandle.Close > nr7High)
+                {
+                    if (!StrategyFilterHelper.CheckHtfGate(_aggregator, "BUY")) return null;
 
-                await _redis.SetValueAsync(stateKey, "InPosition", TimeSpan.FromHours(8));
+                    decimal atr = StrategyFilterHelper.CalculateAtr(candles);
+                    decimal sl = nr7Low > 0 ? nr7Low : Math.Round(currentCandle.Close - (1.0m * atr), 2);
+                    decimal target = Math.Round(currentCandle.Close + (1.8m * atr), 2);
+
+                    await _redis.SetValueAsync(stateKey, "InPosition_Long", TimeSpan.FromHours(8));
+                    return new Signal
+                    {
+                        StrategyName = Name,
+                        Instrument = "NIFTY",
+                        Action = "BUY",
+                        Quantity = 65,
+                        OrderType = "MARKET",
+                        Price = currentCandle.Close,
+                        StopLossPrice = sl,
+                        TargetPrice = target,
+                        Atr = atr,
+                        Rvol = rvol,
+                        Priority = 3
+                    };
+                }
+                // BEARISH ENTRY (PE)
+                else if (currentCandle.Close < nr7Low)
+                {
+                    if (!StrategyFilterHelper.CheckHtfGate(_aggregator, "SELL")) return null;
+
+                    decimal atr = StrategyFilterHelper.CalculateAtr(candles);
+                    decimal sl = nr7High > 0 ? nr7High : Math.Round(currentCandle.Close + (1.0m * atr), 2); // SL is above
+                    decimal target = Math.Round(currentCandle.Close - (1.8m * atr), 2); // Target is below
+
+                    await _redis.SetValueAsync(stateKey, "InPosition_Short", TimeSpan.FromHours(8));
+                    return new Signal
+                    {
+                        StrategyName = Name,
+                        Instrument = "NIFTY",
+                        Action = "BUY_PE",
+                        Quantity = 65,
+                        OrderType = "MARKET",
+                        Price = currentCandle.Close,
+                        StopLossPrice = sl,
+                        TargetPrice = target,
+                        Atr = atr,
+                        Rvol = rvol,
+                        Priority = 3
+                    };
+                }
+            }
+            // EXIT LONG
+            else if (currentState == "InPosition_Long" && currentCandle.Close < nr7Low)
+            {
+                await _redis.DeleteKeyAsync(stateKey);
                 return new Signal
                 {
                     StrategyName = Name,
                     Instrument = "NIFTY",
-                    Action = "BUY",
+                    Action = "EXIT",
                     Quantity = 65,
                     OrderType = "MARKET",
                     Price = currentCandle.Close,
-                    StopLossPrice = sl,
-                    TargetPrice = target,
-                    Atr = atr,
-                    Rvol = rvol,
                     Priority = 3
                 };
             }
-            else if (currentState == "InPosition" && currentCandle.Close < nr7Low)
+            // EXIT SHORT
+            else if (currentState == "InPosition_Short" && currentCandle.Close > nr7High)
             {
                 await _redis.DeleteKeyAsync(stateKey);
                 return new Signal
@@ -597,44 +845,93 @@ namespace StoicTrade.Api.Services.Strategies
 
             var rsiList = candles.GetRsi(14).ToList();
             var lastRsi = rsiList.LastOrDefault()?.Rsi;
-            if (lastRsi == null || lastRsi < 50.0) return null;
+            if (lastRsi == null) return null;
 
             var vwapList = candles.GetVwap().ToList();
             var lastVwap = vwapList.LastOrDefault()?.Vwap;
-            if (lastVwap.HasValue && lastCandle.Close < (decimal)lastVwap.Value) return null;
 
             string stateKey = $"strategy_state_{config.Id}";
             var currentState = await _redis.GetValueAsync(stateKey) ?? "Idle";
 
-            bool crossover = prevMacd.Macd < prevMacd.Signal && lastMacd.Macd > lastMacd.Signal;
+            // Handle legacy state for backward compatibility
+            if (currentState == "InPosition") currentState = "InPosition_Long";
 
-            if (currentState == "Idle" && crossover && lastMacd.Macd < 0)
+            bool crossoverBullish = prevMacd.Macd < prevMacd.Signal && lastMacd.Macd > lastMacd.Signal;
+            bool crossoverBearish = prevMacd.Macd > prevMacd.Signal && lastMacd.Macd < lastMacd.Signal;
+
+            if (currentState == "Idle")
             {
-                if (StrategyFilterHelper.IsMiddayChopHours()) return null;
-                if (!StrategyFilterHelper.CheckHtfGate(_aggregator, "BUY")) return null;
-
-                decimal atr = StrategyFilterHelper.CalculateAtr(candles);
-                decimal sl = Math.Round(lastCandle.Close - (1.0m * atr), 2);
-                decimal target = Math.Round(lastCandle.Close + (1.8m * atr), 2);
                 decimal rvol = StrategyFilterHelper.CalculateRvol(candles);
+                if (StrategyFilterHelper.IsMiddayChopHours()) return null;
 
-                await _redis.SetValueAsync(stateKey, "InPosition", TimeSpan.FromHours(8));
+                // BULLISH ENTRY
+                if (crossoverBullish && lastMacd.Macd < 0 && lastRsi >= 50.0 && (!lastVwap.HasValue || lastCandle.Close > (decimal)lastVwap.Value))
+                {
+                    if (!StrategyFilterHelper.CheckHtfGate(_aggregator, "BUY")) return null;
+
+                    decimal atr = StrategyFilterHelper.CalculateAtr(candles);
+                    decimal sl = Math.Round(lastCandle.Close - (1.0m * atr), 2);
+                    decimal target = Math.Round(lastCandle.Close + (1.8m * atr), 2);
+
+                    await _redis.SetValueAsync(stateKey, "InPosition_Long", TimeSpan.FromHours(8));
+                    return new Signal
+                    {
+                        StrategyName = Name,
+                        Instrument = "NIFTY",
+                        Action = "BUY",
+                        Quantity = 65,
+                        OrderType = "MARKET",
+                        Price = lastCandle.Close,
+                        StopLossPrice = sl,
+                        TargetPrice = target,
+                        Atr = atr,
+                        Rvol = rvol,
+                        Priority = 1
+                    };
+                }
+                // BEARISH ENTRY (PE)
+                else if (crossoverBearish && lastMacd.Macd > 0 && lastRsi < 50.0 && (!lastVwap.HasValue || lastCandle.Close < (decimal)lastVwap.Value))
+                {
+                    if (!StrategyFilterHelper.CheckHtfGate(_aggregator, "SELL")) return null;
+
+                    decimal atr = StrategyFilterHelper.CalculateAtr(candles);
+                    decimal sl = Math.Round(lastCandle.Close + (1.0m * atr), 2); // SL is above
+                    decimal target = Math.Round(lastCandle.Close - (1.8m * atr), 2); // Target is below
+
+                    await _redis.SetValueAsync(stateKey, "InPosition_Short", TimeSpan.FromHours(8));
+                    return new Signal
+                    {
+                        StrategyName = Name,
+                        Instrument = "NIFTY",
+                        Action = "BUY_PE",
+                        Quantity = 65,
+                        OrderType = "MARKET",
+                        Price = lastCandle.Close,
+                        StopLossPrice = sl,
+                        TargetPrice = target,
+                        Atr = atr,
+                        Rvol = rvol,
+                        Priority = 1
+                    };
+                }
+            }
+            // EXIT LONG
+            else if (currentState == "InPosition_Long" && lastMacd.Macd < lastMacd.Signal)
+            {
+                await _redis.DeleteKeyAsync(stateKey);
                 return new Signal
                 {
                     StrategyName = Name,
                     Instrument = "NIFTY",
-                    Action = "BUY",
+                    Action = "EXIT",
                     Quantity = 65,
                     OrderType = "MARKET",
                     Price = lastCandle.Close,
-                    StopLossPrice = sl,
-                    TargetPrice = target,
-                    Atr = atr,
-                    Rvol = rvol,
                     Priority = 1
                 };
             }
-            else if (currentState == "InPosition" && lastMacd.Macd < lastMacd.Signal)
+            // EXIT SHORT
+            else if (currentState == "InPosition_Short" && lastMacd.Macd > lastMacd.Signal)
             {
                 await _redis.DeleteKeyAsync(stateKey);
                 return new Signal
@@ -771,50 +1068,102 @@ namespace StoicTrade.Api.Services.Strategies
 
             var activeFvgs = SmartMoneyStructureHelper.DetectFairValueGaps(candles, minGapPoints);
             var latestBullishFvg = activeFvgs.LastOrDefault(g => g.IsBullish);
-            if (latestBullishFvg == null) return null;
+            var latestBearishFvg = activeFvgs.LastOrDefault(g => !g.IsBullish);
 
             var lastCandle = candles.Last();
             string stateKey = $"strategy_state_{config.Id}";
             var currentState = await _redis.GetValueAsync(stateKey) ?? "Idle";
 
-            // Mitigation Entry Condition:
-            // 1. Current candle dips into the FVG (Low <= Equilibrium)
-            // 2. Closes with rejection inside or above the FVG (Close >= Equilibrium)
-            bool isMitigating = lastCandle.Low <= latestBullishFvg.Equilibrium && lastCandle.Close >= latestBullishFvg.BottomPrice;
+            // Handle legacy state for backward compatibility
+            if (currentState == "InPosition") currentState = "InPosition_Long";
 
-            if (currentState == "Idle" && isMitigating)
+            bool isBullishMitigating = latestBullishFvg != null && lastCandle.Low <= latestBullishFvg.Equilibrium && lastCandle.Close >= latestBullishFvg.BottomPrice;
+            bool isBearishMitigating = latestBearishFvg != null && lastCandle.High >= latestBearishFvg.Equilibrium && lastCandle.Close <= latestBearishFvg.TopPrice;
+
+            if (currentState == "Idle")
             {
                 if (StrategyFilterHelper.IsMiddayChopHours()) return null;
-                if (!StrategyFilterHelper.CheckHtfGate(_aggregator, "BUY")) return null;
 
-                decimal atr = StrategyFilterHelper.CalculateAtr(candles);
-                decimal rvol = StrategyFilterHelper.CalculateRvol(candles);
+                // BULLISH ENTRY
+                if (isBullishMitigating)
+                {
+                    if (!StrategyFilterHelper.CheckHtfGate(_aggregator, "BUY")) return null;
 
-                // Stop loss: placed safely below the bottom of the institutional FVG
-                decimal sl = Math.Round(latestBullishFvg.BottomPrice - 5.0m, 2);
-                decimal risk = Math.Max(12m, lastCandle.Close - sl);
-                decimal target = Math.Round(lastCandle.Close + (risk * 2.0m), 2);
+                    decimal atr = StrategyFilterHelper.CalculateAtr(candles);
+                    decimal rvol = StrategyFilterHelper.CalculateRvol(candles);
 
-                await _redis.SetValueAsync(stateKey, "InPosition", TimeSpan.FromHours(8));
-                _logger.LogInformation("FVG Mitigation BUY triggered at {Price}. FVG Range: {Bottom}-{Top}, SL: {SL}, Target: {Target}",
-                    lastCandle.Close, latestBullishFvg.BottomPrice, latestBullishFvg.TopPrice, sl, target);
+                    decimal sl = Math.Round(latestBullishFvg.BottomPrice - 5.0m, 2);
+                    decimal risk = Math.Max(12m, lastCandle.Close - sl);
+                    decimal target = Math.Round(lastCandle.Close + (risk * 2.0m), 2);
 
+                    await _redis.SetValueAsync(stateKey, "InPosition_Long", TimeSpan.FromHours(8));
+                    _logger.LogInformation("FVG Mitigation BUY triggered at {Price}. FVG Range: {Bottom}-{Top}, SL: {SL}, Target: {Target}",
+                        lastCandle.Close, latestBullishFvg.BottomPrice, latestBullishFvg.TopPrice, sl, target);
+
+                    return new Signal
+                    {
+                        StrategyName = Name,
+                        Instrument = "NIFTY",
+                        Action = "BUY",
+                        Quantity = 65,
+                        OrderType = "MARKET",
+                        Price = lastCandle.Close,
+                        StopLossPrice = sl,
+                        TargetPrice = target,
+                        Atr = atr,
+                        Rvol = rvol,
+                        Priority = 3
+                    };
+                }
+                // BEARISH ENTRY (PE)
+                else if (isBearishMitigating)
+                {
+                    if (!StrategyFilterHelper.CheckHtfGate(_aggregator, "SELL")) return null;
+
+                    decimal atr = StrategyFilterHelper.CalculateAtr(candles);
+                    decimal rvol = StrategyFilterHelper.CalculateRvol(candles);
+
+                    decimal sl = Math.Round(latestBearishFvg.TopPrice + 5.0m, 2);
+                    decimal risk = Math.Max(12m, sl - lastCandle.Close);
+                    decimal target = Math.Round(lastCandle.Close - (risk * 2.0m), 2);
+
+                    await _redis.SetValueAsync(stateKey, "InPosition_Short", TimeSpan.FromHours(8));
+                    _logger.LogInformation("FVG Mitigation SELL triggered at {Price}. FVG Range: {Bottom}-{Top}, SL: {SL}, Target: {Target}",
+                        lastCandle.Close, latestBearishFvg.BottomPrice, latestBearishFvg.TopPrice, sl, target);
+
+                    return new Signal
+                    {
+                        StrategyName = Name,
+                        Instrument = "NIFTY",
+                        Action = "BUY_PE",
+                        Quantity = 65,
+                        OrderType = "MARKET",
+                        Price = lastCandle.Close,
+                        StopLossPrice = sl,
+                        TargetPrice = target,
+                        Atr = atr,
+                        Rvol = rvol,
+                        Priority = 3
+                    };
+                }
+            }
+            // EXIT LONG
+            else if (currentState == "InPosition_Long" && latestBullishFvg != null && lastCandle.Close < latestBullishFvg.BottomPrice)
+            {
+                await _redis.DeleteKeyAsync(stateKey);
                 return new Signal
                 {
                     StrategyName = Name,
                     Instrument = "NIFTY",
-                    Action = "BUY",
+                    Action = "EXIT",
                     Quantity = 65,
                     OrderType = "MARKET",
                     Price = lastCandle.Close,
-                    StopLossPrice = sl,
-                    TargetPrice = target,
-                    Atr = atr,
-                    Rvol = rvol,
                     Priority = 3
                 };
             }
-            else if (currentState == "InPosition" && lastCandle.Close < latestBullishFvg.BottomPrice)
+            // EXIT SHORT
+            else if (currentState == "InPosition_Short" && latestBearishFvg != null && lastCandle.Close > latestBearishFvg.TopPrice)
             {
                 await _redis.DeleteKeyAsync(stateKey);
                 return new Signal

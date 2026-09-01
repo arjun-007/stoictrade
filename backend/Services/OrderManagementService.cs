@@ -39,10 +39,37 @@ namespace StoicTrade.Api.Services
             {
                 var optionEngine = scope.ServiceProvider.GetRequiredService<StoicTrade.Api.Services.Strategies.OptionSelectionEngine>();
 
+                // 1. Intercept EXIT action to close existing position
+                if (signal.Action == "EXIT" && !string.IsNullOrEmpty(signal.StrategyName))
+                {
+                    var openPosition = dbContext.PaperPositions.FirstOrDefault(p => p.StrategyName == signal.StrategyName && p.NetQty != 0);
+                    if (openPosition != null)
+                    {
+                        signal.Instrument = openPosition.Symbol;
+                        signal.Action = "SELL"; // Always SELL to close a long option position
+                        _logger.LogInformation("OrderManagementService [PAPER]: Intercepted EXIT signal. Resolved to close existing position for {Symbol}", signal.Instrument);
+                    }
+                }
+
+                // Handle BUY_PE bias
+                string bias = "BULLISH";
+                if (signal.Action == "BUY_PE")
+                {
+                    bias = "BEARISH";
+                    signal.Action = "BUY"; // Execution is a BUY of the PE option
+                }
+                else if (signal.Action == "BUY")
+                {
+                    bias = "BULLISH";
+                }
+                else if (signal.Action != "SELL") // For any other logic
+                {
+                    bias = "BEARISH"; 
+                }
+
                 // If instrument is raw NIFTY or missing option type, resolve optimal ITM contract
                 if (signal.Instrument == "NIFTY" || (!signal.Instrument.Contains("CE") && !signal.Instrument.Contains("PE")))
                 {
-                    string bias = signal.Action == "BUY" ? "BULLISH" : "BEARISH";
                     var contract = optionEngine.GetOptimalContract("NIFTY", bias, itmDistance: 1, expiryIndex: 1)
                         ?? optionEngine.GetOptimalContract("NIFTY", bias, itmDistance: 1, expiryIndex: 0);
 

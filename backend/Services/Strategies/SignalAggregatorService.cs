@@ -29,8 +29,9 @@ namespace StoicTrade.Api.Services.Strategies
 
             foreach (var group in groupedByInstrument)
             {
-                var buySignals = group.Where(s => s.Action == "BUY").ToList();
+                var buySignals = group.Where(s => s.Action == "BUY" || s.Action == "BUY_PE").ToList();
                 var sellSignals = group.Where(s => s.Action == "SELL").ToList();
+                var exitSignals = group.Where(s => s.Action == "EXIT").ToList();
 
                 if (buySignals.Any() && sellSignals.Any())
                 {
@@ -39,6 +40,13 @@ namespace StoicTrade.Api.Services.Strategies
                     _logger.LogWarning("SignalAggregator: Conflicting signals for {Instrument}. Rejecting both. BUY from: [{BuyStrategies}] vs SELL from: [{SellStrategies}]", 
                         group.Key, buyNames, sellNames);
                     continue;
+                }
+
+                // Pass through ALL exit signals as they are meant to close specific strategy positions
+                if (exitSignals.Any())
+                {
+                    _logger.LogInformation("SignalAggregator: Passing {Count} EXIT signals for {Instrument}", exitSignals.Count, group.Key);
+                    aggregatedSignals.AddRange(exitSignals);
                 }
 
                 // If multiple strategies say BUY, take the one with highest priority (lower number = higher priority)

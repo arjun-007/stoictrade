@@ -175,6 +175,7 @@ namespace StoicTrade.Api.Services.Strategies
                                 {
                                     if (!IsInCooldown(signal.StrategyName))
                                     {
+                                        tickSignals.Add(signal);
                                         AddToSignalLog(new SignalLogEntry
                                         {
                                             StrategyName = signal.StrategyName,
