@@ -34,7 +34,10 @@ namespace StoicTrade.Api.Services.Strategies
 
                 if (buySignals.Any() && sellSignals.Any())
                 {
-                    _logger.LogWarning("SignalAggregator: Conflicting signals for {Instrument}. Rejecting both.", group.Key);
+                    var buyNames = string.Join(", ", buySignals.Select(s => s.StrategyName));
+                    var sellNames = string.Join(", ", sellSignals.Select(s => s.StrategyName));
+                    _logger.LogWarning("SignalAggregator: Conflicting signals for {Instrument}. Rejecting both. BUY from: [{BuyStrategies}] vs SELL from: [{SellStrategies}]", 
+                        group.Key, buyNames, sellNames);
                     continue;
                 }
 

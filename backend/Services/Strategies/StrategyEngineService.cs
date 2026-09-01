@@ -46,6 +46,7 @@ namespace StoicTrade.Api.Services.Strategies
         private const int MaxLogSize = 100;
         private DateTime? _lastSquareOffDate = null;
         private DateTime? _lastDailyResetDate = null;
+        private DateTime? _lastStateResetDate = null;
 
         public StrategyEngineService(
             ILogger<StrategyEngineService> logger,
@@ -75,8 +76,24 @@ namespace StoicTrade.Api.Services.Strategies
 
                     var squareOffTime = new TimeSpan(15, 10, 0); // 3:10 PM IST
                     var autoStopCutoff = new TimeSpan(15, 40, 0); // 3:40 PM IST
+                    var stateResetTime = new TimeSpan(9, 0, 0);   // 9:00 AM IST
                     var marketOpen = new TimeSpan(9, 15, 0);      // 9:15 AM IST
                     var marketClose = new TimeSpan(15, 30, 0);    // 3:30 PM IST
+
+                    // 0. Daily 09:00 AM IST State Reset: Flush stuck strategy states from Redis
+                    if (nowIst >= stateResetTime && _lastStateResetDate != todayIst)
+                    {
+                        _logger.LogInformation("Daily 09:00 AM IST reached. Flushing all strategy state locks from Redis.");
+                        using var stateScope = _serviceProvider.CreateScope();
+                        var redis = stateScope.ServiceProvider.GetRequiredService<StoicTrade.Api.Services.RedisService>();
+                        var stateKeys = await redis.GetKeysByPrefixAsync("strategy_state_");
+                        foreach (var key in stateKeys)
+                        {
+                            await redis.DeleteKeyAsync(key);
+                            _logger.LogInformation("Deleted stale state key: {Key}", key);
+                        }
+                        _lastStateResetDate = todayIst;
+                    }
 
                     // 1. Daily 9:15 AM IST Session Reset: Clear stale signal logs for clean day-to-day tracking
                     if (nowIst >= marketOpen && _lastDailyResetDate != todayIst)
@@ -229,6 +246,10 @@ namespace StoicTrade.Api.Services.Strategies
                                         ExpiresAt = DateTime.UtcNow.AddMinutes(15)
                                     });
                                 }
+                            }
+                            else
+                            {
+                                _logger.LogDebug("Strategy {StrategyName} (ID: {Id}) evaluated but returned no signal. (Skipped or Filter Rejected).", config.StrategyName, config.Id);
                             }
                         }
                     }

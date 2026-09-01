@@ -82,9 +82,13 @@ namespace StoicTrade.Api.Services.MarketData
             return list;
         }
 
+        private long _totalTicksReceived = 0;
+
         public void UpdateTick(string symbol, decimal price, decimal volume = 0, DateTime? timestamp = null)
         {
             var time = timestamp ?? DateTime.UtcNow;
+            
+            long currentTicks = System.Threading.Interlocked.Increment(ref _totalTicksReceived);
 
             if (!_historicalCandles.TryGetValue(symbol, out var resolutions))
                 return;
@@ -95,6 +99,13 @@ namespace StoicTrade.Api.Services.MarketData
                 var candles = kvp.Value;
 
                 if (candles == null) continue;
+
+                // Log tick count periodically or every time if debug is needed (we log every 100 ticks to avoid spam, or on specific conditions)
+                if (currentTicks % 100 == 0 || currentTicks == 1)
+                {
+                    _logger.LogDebug("Ticks Received: {Count} | Last Spot: {Price} | Candle Count ({Res}m): {CandleCount}", 
+                        currentTicks, price, resMinutes, candles.Count);
+                }
 
                 // Determine the candle start time for this resolution
                 // e.g., if time is 10:12:45 and res is 5m, start time is 10:10:00
