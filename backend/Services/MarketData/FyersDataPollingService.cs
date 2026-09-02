@@ -55,6 +55,7 @@ namespace StoicTrade.Api.Services.MarketData
 
             while (!stoppingToken.IsCancellationRequested)
             {
+                int delay = 15000;
                 try
                 {
                     // 1. If engine is stopped, DO NOT poll or generate ticks
@@ -84,6 +85,8 @@ namespace StoicTrade.Api.Services.MarketData
                     var autoStopCutoff = new TimeSpan(15, 40, 0); // 3:40 PM IST
                     var marketOpen = new TimeSpan(9, 15, 0);      // 9:15 AM IST
                     bool isMarketHours = (nowIst < autoStopCutoff && nowIst >= marketOpen);
+                    
+                    delay = isMarketHours ? 2000 : 15000;
 
                     if (tradeMode == "Live" && !isMarketHours)
                     {
@@ -116,7 +119,6 @@ namespace StoicTrade.Api.Services.MarketData
                 }
 
                 // Poll every 2 seconds during market, 15 seconds off-market
-                int delay = isMarketHours ? 2000 : 15000;
                 await Task.Delay(delay, stoppingToken);
             }
 
