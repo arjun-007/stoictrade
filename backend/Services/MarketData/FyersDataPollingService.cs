@@ -95,7 +95,7 @@ namespace StoicTrade.Api.Services.MarketData
 
                     var token = _fyersApi.GetAccessToken();
 
-                    if (isMarketHours && !string.IsNullOrEmpty(token))
+                    if (!string.IsNullOrEmpty(token))
                     {
                         await PollLiveFyersDataAsync(token, stoppingToken);
                     }
@@ -105,8 +105,9 @@ namespace StoicTrade.Api.Services.MarketData
                     }
                     else
                     {
-                        _logger.LogDebug("Fyers Poller: Off-market hours. Data polling skipped.");
+                        _logger.LogDebug("Fyers Poller: Off-market hours and no token. Data polling skipped.");
                     }
+
 
                 }
                 catch (Exception ex)
@@ -114,8 +115,9 @@ namespace StoicTrade.Api.Services.MarketData
                     _logger.LogError(ex, "Fyers Poller Unexpected Error");
                 }
 
-                // Poll every 2 seconds
-                await Task.Delay(2000, stoppingToken);
+                // Poll every 2 seconds during market, 15 seconds off-market
+                int delay = isMarketHours ? 2000 : 15000;
+                await Task.Delay(delay, stoppingToken);
             }
 
             _logger.LogInformation("Fyers Data Polling Service is stopping.");
