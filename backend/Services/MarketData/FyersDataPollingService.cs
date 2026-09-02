@@ -95,16 +95,19 @@ namespace StoicTrade.Api.Services.MarketData
 
                     var token = _fyersApi.GetAccessToken();
 
-                    // If Live mode, or Paper mode with a valid token during market hours: poll live Fyers REST API
                     if (isMarketHours && !string.IsNullOrEmpty(token))
                     {
                         await PollLiveFyersDataAsync(token, stoppingToken);
                     }
+                    else if (isMarketHours && string.IsNullOrEmpty(token))
+                    {
+                        _logger.LogWarning("Fyers Poller: Cannot fetch live market data because the Fyers token is missing. Please log in to Fyers.");
+                    }
                     else
                     {
-                        // In Paper mode or off-market hours without live token: generate realistic simulated market data
-                        await GeneratePaperMarketDataAsync(stoppingToken);
+                        _logger.LogDebug("Fyers Poller: Off-market hours. Data polling skipped.");
                     }
+
                 }
                 catch (Exception ex)
                 {
@@ -130,8 +133,7 @@ namespace StoicTrade.Api.Services.MarketData
             if (!spotRes.IsSuccessStatusCode)
             {
                 var err = await spotRes.Content.ReadAsStringAsync(stoppingToken);
-                _logger.LogWarning("Fyers Poller: Quotes API failed with status {StatusCode}: {Error}. Falling back to simulation.", spotRes.StatusCode, err);
-                await GeneratePaperMarketDataAsync(stoppingToken);
+                _logger.LogWarning("Fyers Poller: Quotes API failed with status {StatusCode}: {Error}. Data polling skipped.", spotRes.StatusCode, err);
                 return;
             }
 
@@ -179,7 +181,7 @@ namespace StoicTrade.Api.Services.MarketData
 
             if (niftySpotPrice == 0)
             {
-                await GeneratePaperMarketDataAsync(stoppingToken);
+                _logger.LogWarning("Fyers Poller: NIFTY spot price was zero or missing. Data polling skipped.");
                 return;
             }
 
@@ -494,41 +496,30 @@ namespace StoicTrade.Api.Services.MarketData
             for (int i = 0; i < 4; i++)
             {
                 DateTime tues = today.AddDays(daysUntilTuesday + (i * 7));
-                int month = tues.Month;
-                string monthChar = month <= 9 ? month.ToString()
-                    : month == 10 ? "O" : month == 11 ? "N" : "D";
-                expiries.Add($"{tues:yy}{monthChar}{tues:dd}");
-            }
+                DateTime lastTues = GetLastTuesdayOfMonth(tues);
 
-            // ── 2. Weekly expiries for Thursdays (next 4 Thursdays) ───────────
-            int daysUntilThursday = ((int)DayOfWeek.Thursday - (int)today.DayOfWeek + 7) % 7;
-            for (int i = 0; i < 4; i++)
-            {
-                DateTime thurs = today.AddDays(daysUntilThursday + (i * 7));
-                DateTime lastThurs = GetLastThursdayOfMonth(thurs);
-
-                // If this Thursday is the last Thursday of the month, NSE issues a monthly contract
+                // If this Tuesday is the last Tuesday of the month, NSE issues a monthly contract
                 // instead of a weekly contract. Use the monthly format (YYMMM) so Fyers doesn't reject it.
-                if (thurs.Date == lastThurs.Date)
+                if (tues.Date == lastTues.Date)
                 {
-                    expiries.Add(thurs.ToString("yyMMM").ToUpper());
+                    expiries.Add(tues.ToString("yyMMM").ToUpper());
                 }
                 else
                 {
-                    int month = thurs.Month;
+                    int month = tues.Month;
                     string monthChar = month <= 9 ? month.ToString()
                         : month == 10 ? "O" : month == 11 ? "N" : "D";
-                    expiries.Add($"{thurs:yy}{monthChar}{thurs:dd}");
+                    expiries.Add($"{tues:yy}{monthChar}{tues:dd}");
                 }
             }
 
-            // ── 3. Monthly expiries: last Thursday of current + next 5 months ──
+            // ── 2. Monthly expiries: last Tuesday of current + next 5 months ──
             for (int m = 0; m < 6; m++)
             {
                 var monthStart = new DateTime(today.Year, today.Month, 1).AddMonths(m);
-                DateTime lastThurs = GetLastThursdayOfMonth(monthStart);
+                DateTime lastTues = GetLastTuesdayOfMonth(monthStart);
 
-                string monthlyFmt = lastThurs.ToString("yyMMM").ToUpper();
+                string monthlyFmt = lastTues.ToString("yyMMM").ToUpper();
                 expiries.Add(monthlyFmt);
             }
 
@@ -541,6 +532,15 @@ namespace StoicTrade.Api.Services.MarketData
             var lastDay = new DateTime(anyDayInMonth.Year, anyDayInMonth.Month,
                 DateTime.DaysInMonth(anyDayInMonth.Year, anyDayInMonth.Month));
             int daysBack = ((int)lastDay.DayOfWeek - (int)DayOfWeek.Thursday + 7) % 7;
+            return lastDay.AddDays(-daysBack);
+        }
+
+        /// <summary>Returns the last Tuesday of the month containing <paramref name="anyDayInMonth"/>.</summary>
+        private static DateTime GetLastTuesdayOfMonth(DateTime anyDayInMonth)
+        {
+            var lastDay = new DateTime(anyDayInMonth.Year, anyDayInMonth.Month,
+                DateTime.DaysInMonth(anyDayInMonth.Year, anyDayInMonth.Month));
+            int daysBack = ((int)lastDay.DayOfWeek - (int)DayOfWeek.Tuesday + 7) % 7;
             return lastDay.AddDays(-daysBack);
         }
     }

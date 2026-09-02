@@ -197,8 +197,8 @@ namespace StoicTrade.Api.Services.Strategies
                                 if (signal.Instrument == "NIFTY" || (!signal.Instrument.Contains("CE") && !signal.Instrument.Contains("PE")))
                                 {
                                     string bias = (signal.Action == "BUY") ? "BULLISH" : "BEARISH";
-                                    var contract = optionEngine.GetOptimalContract("NIFTY", bias, itmDistance: 1, expiryIndex: 1)
-                                        ?? optionEngine.GetOptimalContract("NIFTY", bias, itmDistance: 1, expiryIndex: 0);
+                                    var contract = optionEngine.GetOptimalContract("NIFTY", bias, itmDistance: 1, expiryIndex: 2)
+                                        ?? optionEngine.GetOptimalContract("NIFTY", bias, itmDistance: 1, expiryIndex: 1);
                                     if (!string.IsNullOrEmpty(contract))
                                     {
                                         string optSymbol = contract.Replace("NSE:", "");
@@ -318,8 +318,8 @@ namespace StoicTrade.Api.Services.Strategies
 
                             // Resolve option contract
                             string bias = consensusAction == "BUY" ? "BULLISH" : "BEARISH";
-                            var contract = optionEngine.GetOptimalContract("NIFTY", bias, itmDistance: 1, expiryIndex: 1)
-                                ?? optionEngine.GetOptimalContract("NIFTY", bias, itmDistance: 1, expiryIndex: 0);
+                            var contract = optionEngine.GetOptimalContract("NIFTY", bias, itmDistance: 1, expiryIndex: 2)
+                                ?? optionEngine.GetOptimalContract("NIFTY", bias, itmDistance: 1, expiryIndex: 1);
                             if (!string.IsNullOrEmpty(contract))
                             {
                                 string optSymbol = contract.Replace("NSE:", "");
