@@ -18,6 +18,8 @@ namespace StoicTrade.Api.Models
         public decimal TotalSellValue { get; set; }
         public decimal? TargetPrice { get; set; }
         public decimal? StopLossPrice { get; set; }
+        public decimal? TrailingStopLossPoint { get; set; }
+        public decimal PeakLtp { get; set; }
         public string? StrategyName { get; set; }
         public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
         public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;

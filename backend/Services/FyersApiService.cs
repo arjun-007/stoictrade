@@ -216,10 +216,58 @@ namespace StoicTrade.Api.Services
 
         public async Task PlaceOrderAsync(string instrument, string action, int quantity, decimal expectedPrice)
         {
-            _logger.LogInformation("Fyers API: Placing {Action} order for {Quantity} of {Instrument} at {ExpectedPrice}", 
-                action, quantity, instrument, expectedPrice);
-            // In reality, you would send a POST request to Fyers order placement API here
-            await Task.Delay(100);
+            string fyersSymbol = instrument.StartsWith("NSE:") ? instrument : $"NSE:{instrument}";
+            int side = action.Equals("BUY", StringComparison.OrdinalIgnoreCase) ? 1 : -1;
+
+            _logger.LogInformation("Fyers API: Placing {Action} (side: {Side}) order for {Quantity} of {Instrument} at ₹{ExpectedPrice}", 
+                action, side, quantity, fyersSymbol, expectedPrice);
+
+            if (string.IsNullOrEmpty(_accessToken))
+            {
+                _logger.LogWarning("Fyers API: Order simulated. No active broker access token is available.");
+                await Task.Delay(50);
+                return;
+            }
+
+            try
+            {
+                var orderPayload = new
+                {
+                    symbol = fyersSymbol,
+                    qty = quantity,
+                    type = 2, // 2 = Market order
+                    side = side, // 1 = Buy, -1 = Sell
+                    productType = "INTRADAY",
+                    limitPrice = 0,
+                    stopPrice = 0,
+                    validity = "DAY",
+                    disclosedQty = 0,
+                    offlineOrder = false,
+                    stopLoss = 0,
+                    takeProfit = 0
+                };
+
+                var request = new HttpRequestMessage(HttpMethod.Post, "https://api-t1.fyers.in/api/v3/orders/sync");
+                request.Headers.TryAddWithoutValidation("Authorization", $"{_config["FYERS_APP_ID"]}:{_accessToken}");
+                request.Content = JsonContent.Create(orderPayload);
+
+                var response = await _httpClient.SendAsync(request);
+                var content = await response.Content.ReadAsStringAsync();
+
+                if (response.IsSuccessStatusCode)
+                {
+                    _logger.LogInformation("Fyers API: Order placed successfully for {Symbol}. Response: {Response}", fyersSymbol, content);
+                }
+                else
+                {
+                    _logger.LogError("Fyers API: Order placement failed for {Symbol}. Status: {Status}, Response: {Response}", 
+                        fyersSymbol, response.StatusCode, content);
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Fyers API: Exception while placing order for {Symbol}", fyersSymbol);
+            }
         }
 
         public async Task CancelAllPendingOrdersAsync(string accountId)

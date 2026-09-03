@@ -17,6 +17,7 @@ interface GlobalSettings {
   killSwitchShutdownMinutes: number;
   autoTradeLots: number;
   baseLotSize: number;
+  trailingStopLossPoint: number;
 }
 
 export default function SettingsPage() {
@@ -139,6 +140,16 @@ export default function SettingsPage() {
                 className="w-full px-4 py-3 rounded-xl border border-slate-200 dark:border-slate-700 bg-transparent focus:ring-2 focus:ring-primary outline-none"
               />
               <p className="text-xs text-slate-500 mt-1">Global stop-loss points for a single trade.</p>
+            </div>
+            <div>
+              <label className="block text-sm font-semibold text-slate-700 dark:text-slate-300 mb-2">Global Trailing Stop Loss Point</label>
+              <input 
+                type="number" 
+                value={settings.trailingStopLossPoint ?? 8}
+                onChange={e => handleChange('trailingStopLossPoint', Number(e.target.value))}
+                className="w-full px-4 py-3 rounded-xl border border-slate-200 dark:border-slate-700 bg-transparent focus:ring-2 focus:ring-primary outline-none"
+              />
+              <p className="text-xs text-slate-500 mt-1">Points to trail stop-loss upward as option LTP rises.</p>
             </div>
           </div>
         </section>

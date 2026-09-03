@@ -117,6 +117,14 @@ namespace StoicTrade.Api.Services
                 }
             }
 
+            // Position exits should always execute immediately to protect capital and close exposure
+            if (signal.Action == "EXIT")
+            {
+                _logger.LogInformation("RiskEngine: Signal Action is EXIT for {StrategyName} ({Instrument}). Executing immediate square-off.", signal.StrategyName, signal.Instrument);
+                await _orderManager.ExecuteOrderAsync(signal);
+                return true;
+            }
+
             if (operatingMode == "SignalOnly")
             {
                 _logger.LogInformation("RiskEngine: Mode is SignalOnly. Logging signal but not executing.");

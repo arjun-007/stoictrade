@@ -95,11 +95,13 @@ namespace StoicTrade.Api.Controllers
 
             var grouped = paperPositions
                 .Where(p => !string.IsNullOrWhiteSpace(p.Symbol) && p.Symbol != "NIFTY")
-                .GroupBy(p => NormaliseOptionSymbol(p.Symbol));
+                .GroupBy(p => $"{NormaliseOptionSymbol(p.Symbol)}|{p.StrategyName ?? "Strategy"}");
 
             foreach (var group in grouped)
             {
-                string canonicalSymbol = group.Key;
+                var firstPos = group.First();
+                string canonicalSymbol = NormaliseOptionSymbol(firstPos.Symbol);
+                string strategyName = firstPos.StrategyName ?? "Strategy";
                 int netQty = group.Sum(p => p.NetQty);
                 decimal realizedProfit = group.Sum(p => p.RealizedProfit);
                 var lastUpdatedIst = TimeZoneInfo.ConvertTimeFromUtc(group.Max(p => p.UpdatedAt), ist).Date;
@@ -134,7 +136,7 @@ namespace StoicTrade.Api.Controllers
 
                 decimal ltp = cachedLtp
                     ?? _marketDataCache.GetSpotData(canonicalSymbol)?.Price
-                    ?? (netQty > 0 ? buyAvg : sellAvg);
+                    ?? (netQty > 0 ? buyAvg : (sellAvg > 0 ? sellAvg : buyAvg));
 
                 decimal unrealized = 0;
                 if (netQty > 0) unrealized = (ltp - buyAvg) * netQty;
@@ -144,7 +146,8 @@ namespace StoicTrade.Api.Controllers
                     ?? (buyAvg > 0 ? Math.Round(buyAvg * 1.25m, 2) : 0m);
                 decimal stopLossPrice = group.FirstOrDefault(p => p.StopLossPrice.HasValue && p.StopLossPrice > 0)?.StopLossPrice 
                     ?? (buyAvg > 0 ? Math.Round(Math.Max(5.0m, buyAvg * 0.85m), 2) : 0m);
-                string strategyName = group.FirstOrDefault(p => !string.IsNullOrEmpty(p.StrategyName))?.StrategyName ?? "Strategy";
+                decimal trailingStopLossPoint = group.FirstOrDefault(p => p.TrailingStopLossPoint.HasValue && p.TrailingStopLossPoint > 0)?.TrailingStopLossPoint ?? 8.0m;
+                decimal peakLtp = group.Max(p => p.PeakLtp);
 
                 netPositions.Add(new {
                     symbol = canonicalSymbol,
@@ -154,12 +157,14 @@ namespace StoicTrade.Api.Controllers
                     ltp = ltp,
                     targetPrice = targetPrice,
                     stopLossPrice = stopLossPrice,
+                    trailingStopLossPoint = trailingStopLossPoint,
+                    peakLtp = peakLtp,
                     strategyName = strategyName,
                     realized_profit = realizedProfit,
                     unrealized_profit = unrealized,
                     pl = realizedProfit + unrealized,
                     slNo = 1,
-                    id = group.First().Id,
+                    id = firstPos.Id,
                     isCarryForward = netQty != 0 && TimeZoneInfo.ConvertTimeFromUtc(group.Min(p => p.CreatedAt), ist).Date < todayIst
                 });
 

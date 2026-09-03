@@ -52,6 +52,9 @@ namespace StoicTrade.Api.Controllers
             settings.TradingWindowStart = updatedSettings.TradingWindowStart;
             settings.TradingWindowEnd = updatedSettings.TradingWindowEnd;
             settings.KillSwitchShutdownMinutes = updatedSettings.KillSwitchShutdownMinutes;
+            settings.AutoTradeLots = updatedSettings.AutoTradeLots > 0 ? updatedSettings.AutoTradeLots : 1;
+            settings.BaseLotSize = updatedSettings.BaseLotSize > 0 ? updatedSettings.BaseLotSize : 65;
+            settings.TrailingStopLossPoint = updatedSettings.TrailingStopLossPoint;
 
             await _context.SaveChangesAsync();
             return NoContent();

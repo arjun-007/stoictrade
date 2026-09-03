@@ -16,11 +16,14 @@ interface Position {
   sellPrice?: number;
   targetPrice?: number;
   stopLossPrice?: number;
+  trailingStopLossPoint?: number;
+  peakLtp?: number;
   strategyName?: string;
   ltp: number;
   type: PositionType;
   status: PositionStatus;
   category: PositionCategory;
+  realizedProfit?: number;
 }
 
 const MONTH_NAMES = ["JAN","FEB","MAR","APR","MAY","JUN","JUL","AUG","SEP","OCT","NOV","DEC"];
@@ -139,12 +142,15 @@ export default function PositionsPage() {
               sellPrice: p.sellAvg ?? 0,
               targetPrice: tgt,
               stopLossPrice: sl,
+              trailingStopLossPoint: p.trailingStopLossPoint,
+              peakLtp: p.peakLtp,
               strategyName: p.strategyName ?? "Strategy",
               // ltp comes from the backend option price cache; fall back to avg only if null
               ltp: p.ltp ?? p.buyAvg ?? 0,
               type: (p.netQty ?? 0) >= 0 ? "LONG" : "SHORT",
               status: qty === 0 ? "EXITED" : "ACTIVE",
-              category: p.isCarryForward ? "HOLDING" : "DAY"
+              category: p.isCarryForward ? "HOLDING" : "DAY",
+              realizedProfit: p.realized_profit ?? p.realizedProfit ?? 0
             });
           });
         }
@@ -189,10 +195,14 @@ export default function PositionsPage() {
   });
 
   const totalPnL = filteredData.reduce((acc, pos) => {
+    if (pos.status === "EXITED") {
+      const pnl = pos.realizedProfit !== undefined && pos.realizedProfit !== 0
+        ? pos.realizedProfit
+        : (pos.sellPrice && pos.buyPrice ? (pos.sellPrice - pos.buyPrice) * 65 : 0);
+      return acc + pnl;
+    }
     const entryPrice = pos.type === "LONG" ? pos.buyPrice : (pos.sellPrice ?? 0);
-    const currentPrice = pos.type === "LONG"
-      ? (pos.status === "EXITED" && pos.sellPrice ? pos.sellPrice : pos.ltp)
-      : (pos.status === "EXITED" && pos.buyPrice ? pos.buyPrice : pos.ltp);
+    const currentPrice = pos.ltp;
     const pnl = pos.type === "LONG"
       ? (currentPrice - entryPrice) * pos.qty
       : (entryPrice - currentPrice) * pos.qty;
@@ -331,12 +341,14 @@ export default function PositionsPage() {
               ) : (
                 filteredData.map((pos) => {
                   const entryPrice = pos.type === "LONG" ? pos.buyPrice : (pos.sellPrice ?? 0);
-                  const currentPrice = pos.type === "LONG"
-                    ? (pos.status === "EXITED" && pos.sellPrice ? pos.sellPrice : pos.ltp)
-                    : (pos.status === "EXITED" && pos.buyPrice ? pos.buyPrice : pos.ltp);
-                  const pnl = pos.type === "LONG"
-                    ? (currentPrice - entryPrice) * pos.qty
-                    : (entryPrice - currentPrice) * pos.qty;
+                  const currentPrice = pos.status === "EXITED" && pos.sellPrice ? pos.sellPrice : pos.ltp;
+                  const pnl = pos.status === "EXITED"
+                    ? (pos.realizedProfit !== undefined && pos.realizedProfit !== 0
+                        ? pos.realizedProfit
+                        : (pos.sellPrice && pos.buyPrice ? (pos.sellPrice - pos.buyPrice) * 65 : 0))
+                    : (pos.type === "LONG"
+                      ? (currentPrice - entryPrice) * pos.qty
+                      : (entryPrice - currentPrice) * pos.qty);
                   const isProfit = pnl >= 0;
                   
                   return (
@@ -376,7 +388,10 @@ export default function PositionsPage() {
                         {pos.targetPrice ? `₹${pos.targetPrice.toFixed(2)}` : "—"}
                       </td>
                       <td className="p-4 text-right font-semibold text-rose-600 dark:text-rose-400">
-                        {pos.stopLossPrice ? `₹${pos.stopLossPrice.toFixed(2)}` : "—"}
+                        <div>{pos.stopLossPrice ? `₹${pos.stopLossPrice.toFixed(2)}` : "—"}</div>
+                        {pos.status === "ACTIVE" && pos.trailingStopLossPoint ? (
+                          <div className="text-[10px] text-primary font-normal">Trail: {pos.trailingStopLossPoint}pt</div>
+                        ) : null}
                       </td>
                       <td className="p-4 text-right font-medium">₹{currentPrice.toFixed(2)}</td>
                       <td className={`p-4 text-right font-bold ${isProfit ? 'text-green-500' : 'text-danger'}`}>

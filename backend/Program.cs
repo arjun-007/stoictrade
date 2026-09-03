@@ -48,6 +48,7 @@ builder.Services.AddSingleton<MarketDataCache>();
 builder.Services.AddSingleton<MarketDataAggregatorService>();
 builder.Services.AddHostedService<FyersDataPollingService>();
 builder.Services.AddSingleton<StoicTrade.Api.Services.MarketData.OptionChainAnalysisService>();
+builder.Services.AddSingleton<StoicTrade.Api.Services.MarketData.MorningMarketConditionService>();
 builder.Services.AddSingleton<StoicTrade.Api.Services.Strategies.OptionSelectionEngine>();
 builder.Services.AddSingleton<FyersApiService>();
 builder.Services.AddSingleton<KillSwitchService>();
@@ -127,6 +128,12 @@ using (var scope = app.Services.CreateScope())
 
     try
     {
+        dbContext.Database.ExecuteSqlRaw("ALTER TABLE GlobalSettings ADD COLUMN TrailingStopLossPoint TEXT DEFAULT '8.0'");
+    }
+    catch {}
+
+    try
+    {
         dbContext.Database.ExecuteSqlRaw(@"
             CREATE TABLE IF NOT EXISTS PaperPositions (
                 Id TEXT PRIMARY KEY,
@@ -141,6 +148,8 @@ using (var scope = app.Services.CreateScope())
                 TotalSellValue TEXT NOT NULL,
                 TargetPrice TEXT,
                 StopLossPrice TEXT,
+                TrailingStopLossPoint TEXT,
+                PeakLtp TEXT,
                 StrategyName TEXT,
                 CreatedAt TEXT NOT NULL,
                 UpdatedAt TEXT NOT NULL
@@ -157,6 +166,18 @@ using (var scope = app.Services.CreateScope())
     try
     {
         dbContext.Database.ExecuteSqlRaw("ALTER TABLE PaperPositions ADD COLUMN StopLossPrice TEXT");
+    }
+    catch {}
+
+    try
+    {
+        dbContext.Database.ExecuteSqlRaw("ALTER TABLE PaperPositions ADD COLUMN TrailingStopLossPoint TEXT");
+    }
+    catch {}
+
+    try
+    {
+        dbContext.Database.ExecuteSqlRaw("ALTER TABLE PaperPositions ADD COLUMN PeakLtp TEXT");
     }
     catch {}
 

@@ -27,6 +27,13 @@ namespace StoicTrade.Api.Controllers
             return Ok(data);
         }
 
+        [HttpGet("morning-condition")]
+        public IActionResult GetMorningMarketCondition([FromServices] MorningMarketConditionService morningScanner, [FromQuery] string symbol = "NSE:NIFTY50-INDEX")
+        {
+            var analysis = morningScanner.AnalyzeMorningCondition(symbol);
+            return Ok(analysis);
+        }
+
         [HttpGet("options")]
         public IActionResult GetOptionChain([FromQuery] string symbol = "NIFTY")
         {

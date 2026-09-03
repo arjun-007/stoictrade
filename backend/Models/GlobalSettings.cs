@@ -21,5 +21,6 @@ namespace StoicTrade.Api.Models
         public int KillSwitchShutdownMinutes { get; set; } = 720;
         public int AutoTradeLots { get; set; } = 1;
         public int BaseLotSize { get; set; } = 65;
+        public decimal TrailingStopLossPoint { get; set; } = 8.0m;
     }
 }

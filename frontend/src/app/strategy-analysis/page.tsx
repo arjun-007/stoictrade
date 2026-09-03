@@ -764,8 +764,8 @@ export default function StrategyAnalysisPage() {
                       const statusMeta = STATUS_META[entry.status] ?? STATUS_META.SignalOnly;
                       const isGroupSignal = entry.strategyName.startsWith("Group:");
                       const dateBadge = formatSignalDateBadge(entry.generatedAt);
-                      const tgt = entry.targetPrice && entry.targetPrice > 0 ? entry.targetPrice : (entry.price > 0 ? entry.price * 1.25 : 0);
-                      const sl = entry.stopLossPrice && entry.stopLossPrice > 0 ? entry.stopLossPrice : (entry.price > 0 ? Math.max(5, entry.price * 0.85) : 0);
+                      const tgt = entry.action === "EXIT" ? (entry.targetPrice && entry.targetPrice > 0 ? entry.targetPrice : 0) : (entry.targetPrice && entry.targetPrice > 0 ? entry.targetPrice : (entry.price > 0 ? entry.price * 1.25 : 0));
+                      const sl = entry.action === "EXIT" ? (entry.stopLossPrice && entry.stopLossPrice > 0 ? entry.stopLossPrice : 0) : (entry.stopLossPrice && entry.stopLossPrice > 0 ? entry.stopLossPrice : (entry.price > 0 ? Math.max(5, entry.price * 0.85) : 0));
 
                       return (
                         <tr

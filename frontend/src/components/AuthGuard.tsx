@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import Navigation from "@/components/Navigation";
 import GlobalPendingApprovalsBanner from "@/components/GlobalPendingApprovalsBanner";
+import MorningConditionBanner from "@/components/MorningConditionBanner";
 
 export default function AuthGuard({ children }: { children: React.ReactNode }) {
   const [isAuthenticated, setIsAuthenticated] = useState<boolean | null>(null);
@@ -33,12 +34,13 @@ export default function AuthGuard({ children }: { children: React.ReactNode }) {
     return <main className="flex-1 w-full overflow-y-auto">{children}</main>;
   }
 
-  // Render App with Navigation bar and Global Approvals Banner
+  // Render App with Navigation bar, Global Approvals Banner, and Morning Condition Banner
   return (
     <div className="flex flex-col md:flex-row w-full min-h-screen">
       <Navigation />
       <main className="flex-1 w-full pb-20 md:pb-0 overflow-y-auto flex flex-col">
         <GlobalPendingApprovalsBanner />
+        <MorningConditionBanner />
         <div className="flex-1 w-full">
           {children}
         </div>

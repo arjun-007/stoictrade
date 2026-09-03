@@ -110,8 +110,8 @@ namespace StoicTrade.Api.Services.Strategies
                         {
                             _logger.LogInformation("Daily 3:10 PM IST reached. Triggering Auto-Square-Off for all active positions.");
                             using var autoScope = _serviceProvider.CreateScope();
-                            var orderManager = autoScope.ServiceProvider.GetRequiredService<OrderManagementService>();
-                            await orderManager.AutoSquareOffAllPositionsAsync("Daily_310PM_AutoSquareOff");
+                            var autoSquareManager = autoScope.ServiceProvider.GetRequiredService<OrderManagementService>();
+                            await autoSquareManager.AutoSquareOffAllPositionsAsync("Daily_310PM_AutoSquareOff");
                             _lastSquareOffDate = todayIst;
                         }
                     }
@@ -149,6 +149,10 @@ namespace StoicTrade.Api.Services.Strategies
                         continue;
                     }
 
+                    // 5b. Monitor active positions for Target, Stop Loss, and Trailing Stop Loss
+                    var orderManager = scope.ServiceProvider.GetRequiredService<OrderManagementService>();
+                    await orderManager.MonitorActivePositionsAsync(_serviceProvider);
+
                     // 6. Fetch enabled strategies and strategy groups from DB
                     var activeConfigs = dbContext.StrategyConfigs.Where(s => s.IsEnabled).ToList();
                     var activeGroups = dbContext.StrategyGroups.Where(g => g.IsEnabled).ToList();
@@ -170,11 +174,22 @@ namespace StoicTrade.Api.Services.Strategies
                             var signal = await strategy.ExecuteAsync(config, marketDataJson);
                             if (signal != null)
                             {
-                                // If position exit signal, log exit and do not buy PE
+                                // If position exit signal, resolve actual open position symbol & price
                                 if (signal.Action == "EXIT")
                                 {
                                     if (!IsInCooldown(signal.StrategyName))
                                     {
+                                        var openPos = dbContext.PaperPositions.FirstOrDefault(p => p.StrategyName == signal.StrategyName && p.NetQty > 0);
+                                        if (openPos != null)
+                                        {
+                                            signal.Instrument = openPos.Symbol;
+                                            decimal? optLtp = optionEngine.ResolveOptionLtp(openPos.Symbol);
+                                            signal.Price = (optLtp.HasValue && optLtp.Value > 0) ? optLtp.Value : (openPos.BuyAvg > 0 ? openPos.BuyAvg : signal.Price);
+                                            signal.Quantity = openPos.NetQty;
+                                            signal.TargetPrice = openPos.TargetPrice ?? 0;
+                                            signal.StopLossPrice = openPos.StopLossPrice ?? 0;
+                                        }
+
                                         tickSignals.Add(signal);
                                         AddToSignalLog(new SignalLogEntry
                                         {
@@ -182,8 +197,8 @@ namespace StoicTrade.Api.Services.Strategies
                                             Action = "EXIT",
                                             Instrument = signal.Instrument,
                                             Price = signal.Price,
-                                            TargetPrice = 0,
-                                            StopLossPrice = 0,
+                                            TargetPrice = signal.TargetPrice,
+                                            StopLossPrice = signal.StopLossPrice,
                                             Quantity = signal.Quantity,
                                             Status = "ExitSignal",
                                             GeneratedAt = DateTime.UtcNow,
@@ -417,7 +432,7 @@ namespace StoicTrade.Api.Services.Strategies
             _lastSignalEmissionTime.Clear();
         }
 
-        private static void AddToSignalLog(SignalLogEntry entry)
+        public static void AddToSignalLog(SignalLogEntry entry)
         {
             RecentSignals.Enqueue(entry);
             // Trim to last MaxLogSize entries
