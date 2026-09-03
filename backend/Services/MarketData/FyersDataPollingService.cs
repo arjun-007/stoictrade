@@ -161,7 +161,21 @@ namespace StoicTrade.Api.Services.MarketData
                     string rawName = !string.IsNullOrEmpty(queryName) ? queryName : (!string.IsNullOrEmpty(sym) ? sym : shortName);
                     var volume = v.TryGetProperty("volume", out var vol) ? vol.GetDecimal() : 0m;
 
-                    if (rawName.Contains("NIFTY", StringComparison.OrdinalIgnoreCase))
+                    // Disambiguate NIFTY 50 vs BANK NIFTY vs INDIA VIX vs Equities
+                    if (rawName.Contains("BANK", StringComparison.OrdinalIgnoreCase))
+                    {
+                        _cache.UpdateSpotData("BANKNIFTY", lp, DateTime.UtcNow, prevClose, ch, chp);
+                        _cache.UpdateSpotData("NIFTYBANK-INDEX", lp, DateTime.UtcNow, prevClose, ch, chp);
+                    }
+                    else if (rawName.Contains("VIX", StringComparison.OrdinalIgnoreCase))
+                    {
+                        _cache.UpdateSpotData("INDIAVIX", lp, DateTime.UtcNow, prevClose, ch, chp);
+                        _cache.UpdateSpotData("INDIAVIX-INDEX", lp, DateTime.UtcNow, prevClose, ch, chp);
+                    }
+                    else if (rawName.Contains("NIFTY50", StringComparison.OrdinalIgnoreCase) || 
+                             rawName.Equals("NIFTY", StringComparison.OrdinalIgnoreCase) || 
+                             rawName.Equals("NSE:NIFTY50-INDEX", StringComparison.OrdinalIgnoreCase) ||
+                             (rawName.Contains("NIFTY", StringComparison.OrdinalIgnoreCase) && !rawName.Contains("BANK", StringComparison.OrdinalIgnoreCase)))
                     {
                         niftySpotPrice = lp;
                         _simulatedNiftyPrice = lp;
@@ -250,6 +264,8 @@ namespace StoicTrade.Api.Services.MarketData
 
             _cache.UpdateSpotData("NIFTY", _simulatedNiftyPrice, DateTime.UtcNow, prevClose, change, changePercent);
             _cache.UpdateSpotData("NIFTY50-INDEX", _simulatedNiftyPrice, DateTime.UtcNow, prevClose, change, changePercent);
+            _cache.UpdateSpotData("BANKNIFTY", 52450.0m + (decimal)((_random.NextDouble() * 10) - 5), DateTime.UtcNow, 52350m);
+            _cache.UpdateSpotData("INDIAVIX", 13.80m + (decimal)((_random.NextDouble() * 0.4) - 0.2), DateTime.UtcNow, 13.75m);
             _cache.UpdateSpotData("HDFCBANK", 1645.50m + (decimal)((_random.NextDouble() * 2) - 1), DateTime.UtcNow, 1640m);
             _cache.UpdateSpotData("RELIANCE", 2985.20m + (decimal)((_random.NextDouble() * 3) - 1.5), DateTime.UtcNow, 2975m);
 
