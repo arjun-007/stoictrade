@@ -12,6 +12,8 @@ namespace StoicTrade.Api.Models
         public bool IsPriorDayCompressed { get; set; }
         public string CompressionType { get; set; } = "None"; // "NR7", "NR4", "InsideDay", "Normal"
         public decimal PriorDayRange { get; set; }
+        public decimal PriorDayHigh { get; set; }
+        public decimal PriorDayLow { get; set; }
 
         // Step 2: 15-Minute Rejection Rule (09:15 - 09:35)
         public string LiquidityRejection { get; set; } = "None"; // "BULLISH_SWEEP", "BEARISH_TRAP", "None"

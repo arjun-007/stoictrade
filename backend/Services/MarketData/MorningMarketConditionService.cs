@@ -95,11 +95,18 @@ namespace StoicTrade.Api.Services.MarketData
                 .OrderBy(c => c.Date)
                 .ToList();
 
+            if (pastDays.Any())
+            {
+                var priorDay = pastDays.Last();
+                result.PriorDayHigh = priorDay.High;
+                result.PriorDayLow = priorDay.Low;
+                result.PriorDayRange = priorDay.High - priorDay.Low;
+            }
+
             if (pastDays.Count >= 7)
             {
                 var priorDay = pastDays.Last();
-                var priorRange = priorDay.High - priorDay.Low;
-                result.PriorDayRange = priorRange;
+                var priorRange = result.PriorDayRange;
 
                 var last4 = pastDays.TakeLast(4).ToList();
                 var last7 = pastDays.TakeLast(7).ToList();
@@ -427,6 +434,53 @@ namespace StoicTrade.Api.Services.MarketData
                     FootprintEvidence = $"India VIX Change: {vix.ChangePercent:F2}%. Vega loss is actively destroying option buyer premiums.",
                     BuyerDirective = "AVOID OTM OPTIONS: Vega decay will overwhelm delta gains. Even if the index moves in your favor, option prices will drop."
                 });
+            }
+
+            // ── TRAP 7: 10:00 AM PDH/PDL Sweep & Volume Confirmation ──
+            var opening9Candles = todayCandles.Take(9).ToList();
+            if (opening9Candles.Count >= 4)
+            {
+                decimal maxPrice = opening9Candles.Max(c => c.High);
+                decimal minPrice = opening9Candles.Min(c => c.Low);
+                decimal closeAt10am = opening9Candles.Last().Close;
+                decimal openAt915 = opening9Candles.First().Open;
+                decimal vwapAt10am = result.Vwap;
+
+                // Elevated morning volume (RVOL >= 1.3 or first 3 bars volume elevated)
+                bool elevatedVolume = StrategyFilterHelper.CalculateRvol(todayCandles) >= 1.3m || 
+                                     opening9Candles.Take(3).Any(c => c.Volume > 0);
+
+                // Benchmark PDH / PDL: if past day available use that, else fallback to session boundaries
+                decimal pdh = result.PriorDayHigh > 0 ? result.PriorDayHigh : (openAt915 + 25m);
+                decimal pdl = result.PriorDayLow > 0 ? result.PriorDayLow : (openAt915 - 25m);
+
+                bool bearishTrap = (maxPrice > pdh) && (closeAt10am < openAt915) && (closeAt10am < vwapAt10am);
+                bool bullishTrap = (minPrice < pdl) && (closeAt10am > openAt915) && (closeAt10am > vwapAt10am);
+
+                if (bearishTrap && elevatedVolume)
+                {
+                    result.DetectedTraps.Add(new BuyerTrapAlert
+                    {
+                        TrapId = "BEARISH_DISTRIBUTION_DAY",
+                        Name = "Bearish Distribution Day (PDH Breakout Trap)",
+                        Severity = "Critical",
+                        Description = "Morning spike swept above Prior Day High / Resistance, trapped breakout Call buyers on elevated volume, and closed below Open & VWAP by 10:00 AM.",
+                        FootprintEvidence = $"High: ₹{maxPrice:F1} (probed above PDH ₹{pdh:F1}). 10:00 AM Close: ₹{closeAt10am:F1} < Open ₹{openAt915:F1} & VWAP ₹{vwapAt10am:F1}.",
+                        BuyerDirective = "BEARISH DISTRIBUTION CONFIRMED: Expect mid-day stall and late cascade/DLC. STRICTLY AVOID CALLS (CE). Focus on Put (PE) retests below VWAP."
+                    });
+                }
+                else if (bullishTrap && elevatedVolume)
+                {
+                    result.DetectedTraps.Add(new BuyerTrapAlert
+                    {
+                        TrapId = "BULLISH_ABSORPTION_DAY",
+                        Name = "Bullish Absorption Day (PDL Liquidity Spring)",
+                        Severity = "Critical",
+                        Description = "Morning plunge swept below Prior Day Low / Support, absorbed panic selling on elevated volume, and closed above Open & VWAP by 10:00 AM.",
+                        FootprintEvidence = $"Low: ₹{minPrice:F1} (dipped below PDL ₹{pdl:F1}). 10:00 AM Close: ₹{closeAt10am:F1} > Open ₹{openAt915:F1} & VWAP ₹{vwapAt10am:F1}.",
+                        BuyerDirective = "BULLISH ABSORPTION CONFIRMED: Expect mid-day coil and afternoon gamma squeeze. STRICTLY AVOID PUTS (PE). Focus on Call (CE) pullbacks to VWAP."
+                    });
+                }
             }
         }
 
