@@ -70,7 +70,7 @@ namespace StoicTrade.Api.Services
 
             // 4. Instrument Rule: Only allow NIFTY Index / Options and Equity Stocks (EQ)
             var instrument = signal.Instrument.ToUpperInvariant();
-            bool isNifty = instrument == "NIFTY" || (instrument.StartsWith("NIFTY") && (instrument.Contains("CE") || instrument.Contains("PE")));
+            bool isNifty = (instrument == "NIFTY" || (instrument.StartsWith("NIFTY") && (instrument.Contains("CE") || instrument.Contains("PE")))) && !instrument.Contains("BANK");
             bool isEquity = instrument.EndsWith("-EQ");
 
             if (!isNifty && !isEquity)

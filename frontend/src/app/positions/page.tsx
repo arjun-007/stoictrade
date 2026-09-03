@@ -42,7 +42,7 @@ export function formatInstrumentName(symbol: string): string {
   if (s.startsWith("NSE:")) s = s.substring(4);
   if (s.startsWith("NIFTYNIFTY")) s = s.substring(5);
 
-  if (!s.startsWith("NIFTY")) return s;
+  if (!s.startsWith("NIFTY") || s.startsWith("NIFTYBANK") || s.startsWith("BANKNIFTY")) return s;
   const rest = s.substring(5); // after "NIFTY"
   
   const type = rest.endsWith("CE") ? "CE" : rest.endsWith("PE") ? "PE" : "";

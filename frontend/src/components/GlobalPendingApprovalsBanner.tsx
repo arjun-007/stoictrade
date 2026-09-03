@@ -10,7 +10,7 @@ function formatOptionSymbol(raw: string): string {
   if (s.startsWith("NIFTYNIFTY")) s = s.substring(5);
 
   // If matches canonical NIFTY{EXPIRY}{STRIKE}{TYPE}
-  if (s.startsWith("NIFTY")) {
+  if (s.startsWith("NIFTY") && !s.startsWith("NIFTYBANK")) {
     const withoutPrefix = s.substring(5);
     const isCe = withoutPrefix.endsWith("CE");
     const isPe = withoutPrefix.endsWith("PE");
