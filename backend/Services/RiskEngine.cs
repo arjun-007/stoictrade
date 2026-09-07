@@ -200,5 +200,4 @@ namespace StoicTrade.Api.Services
             };
         }
     }
-    }
 }
