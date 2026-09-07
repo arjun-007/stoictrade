@@ -22,7 +22,8 @@ interface SignalLogCardProps {
 }
 
 export const SignalLogCard: React.FC<SignalLogCardProps> = ({ signal }) => {
-  const isBuy = signal.action === 'BUY';
+  const isBuy = signal.action === 'BUY' || signal.action === 'BUY_CE';
+  const isBuyPe = signal.action === 'BUY_PE';
   const isExit = signal.action === 'EXIT';
   
   const isExpired = signal.expiresAt
@@ -41,6 +42,8 @@ export const SignalLogCard: React.FC<SignalLogCardProps> = ({ signal }) => {
         return { label: 'Auto-Executed', bg: COLORS.profitLight, text: COLORS.profit };
       case 'AwaitingApproval':
         return { label: 'Awaiting Approval', bg: 'rgba(59, 130, 246, 0.15)', text: '#3b82f6' };
+      case 'Blocked':
+        return { label: 'Blocked', bg: 'rgba(239, 68, 68, 0.15)', text: '#ef4444' };
       case 'ExitSignal':
         return { label: 'Position Exit', bg: COLORS.warningLight, text: COLORS.warning };
       default:
@@ -78,7 +81,7 @@ export const SignalLogCard: React.FC<SignalLogCardProps> = ({ signal }) => {
       <Text style={styles.strategyName}>{signal.strategyName}</Text>
 
       <View style={styles.instrumentRow}>
-        <View style={[styles.actionTag, isBuy ? styles.tagBuy : isExit ? styles.tagExit : styles.tagSell]}>
+        <View style={[styles.actionTag, isBuy ? styles.tagBuy : isExit ? styles.tagExit : isBuyPe ? styles.tagSell : styles.tagSell]}>
           {isBuy ? (
             <TrendingUp size={14} color={COLORS.profit} />
           ) : isExit ? (
@@ -87,7 +90,7 @@ export const SignalLogCard: React.FC<SignalLogCardProps> = ({ signal }) => {
             <TrendingDown size={14} color={COLORS.loss} />
           )}
           <Text style={[styles.actionTagText, isBuy ? styles.textBuy : isExit ? styles.textExit : styles.textSell]}>
-            {signal.action}
+            {signal.action.replace('_', ' ')}
           </Text>
         </View>
 

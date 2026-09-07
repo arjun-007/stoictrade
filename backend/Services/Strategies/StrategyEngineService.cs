@@ -27,6 +27,7 @@ namespace StoicTrade.Api.Services.Strategies
         public int Quantity { get; set; }
         /// <summary>AutoExecuted | AwaitingApproval | SignalOnly | Blocked | ExitSignal</summary>
         public string Status { get; set; } = string.Empty;
+        public string? RejectionReason { get; set; }
         public DateTime GeneratedAt { get; set; } = DateTime.UtcNow;
         public DateTime ExpiresAt { get; set; } = DateTime.UtcNow.AddMinutes(15);
         public bool IsActive => DateTime.UtcNow <= ExpiresAt;
@@ -155,7 +156,12 @@ namespace StoicTrade.Api.Services.Strategies
 
                     // 6. Fetch enabled strategies and strategy groups from DB
                     var activeConfigs = dbContext.StrategyConfigs.Where(s => s.IsEnabled).ToList();
-                    var activeGroups = dbContext.StrategyGroups.Where(g => g.IsEnabled).ToList();
+                    List<StrategyGroup> activeGroups = new();
+                    try
+                    {
+                        activeGroups = dbContext.StrategyGroups.Where(g => g.IsEnabled).ToList();
+                    }
+                    catch { }
 
                     // 7. Fetch market data based on TradeMode
                     var marketCache = scope.ServiceProvider.GetRequiredService<StoicTrade.Api.Services.MarketData.MarketDataCache>();
@@ -188,22 +194,68 @@ namespace StoicTrade.Api.Services.Strategies
                                             signal.Quantity = openPos.NetQty;
                                             signal.TargetPrice = openPos.TargetPrice ?? 0;
                                             signal.StopLossPrice = openPos.StopLossPrice ?? 0;
-                                        }
 
-                                        tickSignals.Add(signal);
-                                        AddToSignalLog(new SignalLogEntry
+                                            tickSignals.Add(signal);
+                                            AddToSignalLog(new SignalLogEntry
+                                            {
+                                                StrategyName = signal.StrategyName,
+                                                Action = "EXIT",
+                                                Instrument = signal.Instrument,
+                                                Price = signal.Price,
+                                                TargetPrice = signal.TargetPrice,
+                                                StopLossPrice = signal.StopLossPrice,
+                                                Quantity = signal.Quantity,
+                                                Status = "ExitSignal",
+                                                GeneratedAt = DateTime.UtcNow,
+                                                ExpiresAt = DateTime.UtcNow.AddMinutes(15)
+                                            });
+                                        }
+                                        else
                                         {
-                                            StrategyName = signal.StrategyName,
-                                            Action = "EXIT",
-                                            Instrument = signal.Instrument,
-                                            Price = signal.Price,
-                                            TargetPrice = signal.TargetPrice,
-                                            StopLossPrice = signal.StopLossPrice,
-                                            Quantity = signal.Quantity,
-                                            Status = "ExitSignal",
-                                            GeneratedAt = DateTime.UtcNow,
-                                            ExpiresAt = DateTime.UtcNow.AddMinutes(15)
-                                        });
+                                            // Check if this strategy had an active SignalOnly tracked contract in Redis
+                                            var redis = scope.ServiceProvider.GetService<RedisService>();
+                                            string? trackedContract = null;
+                                            if (redis != null)
+                                            {
+                                                trackedContract = await redis.GetValueAsync($"signal_contract_{config.Id}");
+                                            }
+
+                                            if (!string.IsNullOrEmpty(trackedContract))
+                                            {
+                                                signal.Instrument = trackedContract;
+                                                decimal? optLtp = optionEngine.ResolveOptionLtp(trackedContract);
+                                                signal.Price = (optLtp.HasValue && optLtp.Value > 0) ? optLtp.Value : 150m;
+
+                                                AddToSignalLog(new SignalLogEntry
+                                                {
+                                                    StrategyName = signal.StrategyName,
+                                                    Action = "EXIT",
+                                                    Instrument = signal.Instrument,
+                                                    Price = signal.Price,
+                                                    TargetPrice = 0,
+                                                    StopLossPrice = 0,
+                                                    Quantity = signal.Quantity,
+                                                    Status = "SignalOnly",
+                                                    GeneratedAt = DateTime.UtcNow,
+                                                    ExpiresAt = DateTime.UtcNow.AddMinutes(15)
+                                                });
+
+                                                if (redis != null)
+                                                {
+                                                    await redis.DeleteKeyAsync($"signal_contract_{config.Id}");
+                                                }
+                                            }
+                                            else
+                                            {
+                                                // Suppress phantom EXIT signal: No open position and no tracked contract
+                                                // Clean up any stale strategy_state_{config.Id} key in Redis
+                                                if (redis != null)
+                                                {
+                                                    await redis.DeleteKeyAsync($"strategy_state_{config.Id}");
+                                                }
+                                                _logger.LogDebug("Suppressed phantom EXIT signal for {StrategyName} (no open position found).", signal.StrategyName);
+                                            }
+                                        }
                                     }
                                     continue;
                                 }
@@ -239,28 +291,34 @@ namespace StoicTrade.Api.Services.Strategies
                                 // Anti-Spam / Cooldown Check: avoid repeating the same strategy signal within cooldown window
                                 if (!IsInCooldown(signal.StrategyName))
                                 {
-                                    tickSignals.Add(signal);
-                                    // Determine log status based on operating mode
-                                    string logStatus = config.OperatingMode switch
+                                    if (config.OperatingMode == "SignalOnly")
                                     {
-                                        "Automatic" => "AutoExecuted",
-                                        "ApprovalRequired" => "AwaitingApproval",
-                                        "SignalOnly" => "SignalOnly",
-                                        _ => "SignalOnly"
-                                    };
-                                    AddToSignalLog(new SignalLogEntry
+                                        // Save chosen contract in Redis so EXIT can resolve the option symbol and LTP
+                                        var redis = scope.ServiceProvider.GetService<RedisService>();
+                                        if (redis != null)
+                                        {
+                                            await redis.SetValueAsync($"signal_contract_{config.Id}", signal.Instrument, TimeSpan.FromHours(8));
+                                        }
+
+                                        AddToSignalLog(new SignalLogEntry
+                                        {
+                                            StrategyName = signal.StrategyName,
+                                            Action = signal.Action,
+                                            Instrument = signal.Instrument,
+                                            Price = signal.Price,
+                                            TargetPrice = signal.TargetPrice,
+                                            StopLossPrice = signal.StopLossPrice,
+                                            Quantity = signal.Quantity,
+                                            Status = "SignalOnly",
+                                            GeneratedAt = DateTime.UtcNow,
+                                            ExpiresAt = DateTime.UtcNow.AddMinutes(15)
+                                        });
+                                    }
+                                    else
                                     {
-                                        StrategyName = signal.StrategyName,
-                                        Action = signal.Action,
-                                        Instrument = signal.Instrument,
-                                        Price = signal.Price,
-                                        TargetPrice = signal.TargetPrice,
-                                        StopLossPrice = signal.StopLossPrice,
-                                        Quantity = signal.Quantity,
-                                        Status = logStatus,
-                                        GeneratedAt = DateTime.UtcNow,
-                                        ExpiresAt = DateTime.UtcNow.AddMinutes(15)
-                                    });
+                                        // Pass to tickSignals to be evaluated and truthfully logged after RiskEngine
+                                        tickSignals.Add(signal);
+                                    }
                                 }
                             }
                             else
@@ -357,28 +415,26 @@ namespace StoicTrade.Api.Services.Strategies
                             // Anti-Spam / Cooldown Check for Squad signals
                             if (!IsInCooldown(groupSignal.StrategyName))
                             {
-                                tickSignals.Add(groupSignal);
-
-                                string logStatus = group.OperatingMode switch
+                                if (group.OperatingMode == "SignalOnly")
                                 {
-                                    "Automatic" => "AutoExecuted",
-                                    "ApprovalRequired" => "AwaitingApproval",
-                                    "SignalOnly" => "SignalOnly",
-                                    _ => "SignalOnly"
-                                };
-                                AddToSignalLog(new SignalLogEntry
+                                    AddToSignalLog(new SignalLogEntry
+                                    {
+                                        StrategyName = groupSignal.StrategyName,
+                                        Action = groupSignal.Action,
+                                        Instrument = groupSignal.Instrument,
+                                        Price = groupSignal.Price,
+                                        TargetPrice = groupSignal.TargetPrice,
+                                        StopLossPrice = groupSignal.StopLossPrice,
+                                        Quantity = groupSignal.Quantity,
+                                        Status = "SignalOnly",
+                                        GeneratedAt = DateTime.UtcNow,
+                                        ExpiresAt = DateTime.UtcNow.AddMinutes(15)
+                                    });
+                                }
+                                else
                                 {
-                                    StrategyName = groupSignal.StrategyName,
-                                    Action = groupSignal.Action,
-                                    Instrument = groupSignal.Instrument,
-                                    Price = groupSignal.Price,
-                                    TargetPrice = groupSignal.TargetPrice,
-                                    StopLossPrice = groupSignal.StopLossPrice,
-                                    Quantity = groupSignal.Quantity,
-                                    Status = logStatus,
-                                    GeneratedAt = DateTime.UtcNow,
-                                    ExpiresAt = DateTime.UtcNow.AddMinutes(15)
-                                });
+                                    tickSignals.Add(groupSignal);
+                                }
                             }
                         }
                     }
@@ -397,7 +453,25 @@ namespace StoicTrade.Api.Services.Strategies
                             signal.Quantity = globalSettings.BaseLotSize * Math.Max(1, globalSettings.AutoTradeLots);
                         }
                         
-                        await riskEngine.EvaluateAndExecuteAsync(signal);
+                        var evalResult = await riskEngine.EvaluateAndExecuteAsync(signal);
+
+                        if (signal.Action != "EXIT")
+                        {
+                            AddToSignalLog(new SignalLogEntry
+                            {
+                                StrategyName = signal.StrategyName,
+                                Action = signal.Action,
+                                Instrument = signal.Instrument,
+                                Price = signal.Price,
+                                TargetPrice = signal.TargetPrice,
+                                StopLossPrice = signal.StopLossPrice,
+                                Quantity = signal.Quantity,
+                                Status = evalResult.Status,
+                                RejectionReason = evalResult.RejectionReason,
+                                GeneratedAt = DateTime.UtcNow,
+                                ExpiresAt = DateTime.UtcNow.AddMinutes(15)
+                            });
+                        }
                     }
                 }
                 catch (Exception ex)

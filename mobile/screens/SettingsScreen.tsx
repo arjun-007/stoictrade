@@ -39,6 +39,7 @@ export interface FullGlobalSettings {
   killSwitchShutdownMinutes: number;
   autoTradeLots: number;
   baseLotSize: number;
+  trailingStopLossPoint: number;
 }
 
 export const SettingsScreen: React.FC = () => {
@@ -55,6 +56,7 @@ export const SettingsScreen: React.FC = () => {
     killSwitchShutdownMinutes: 20,
     autoTradeLots: 1,
     baseLotSize: 65,
+    trailingStopLossPoint: 8,
   });
 
   const [loading, setLoading] = useState(true);
@@ -218,6 +220,16 @@ export const SettingsScreen: React.FC = () => {
               keyboardType="numeric"
             />
           </View>
+        </View>
+
+        <View style={{ marginTop: 12 }}>
+          <Text style={styles.inputLabel}>Trailing Stop Loss (pts) - Locks in Profit</Text>
+          <TextInput
+            style={styles.input}
+            value={settings.trailingStopLossPoint?.toString()}
+            onChangeText={(val) => handleFieldChange('trailingStopLossPoint', parseFloat(val) || 0)}
+            keyboardType="numeric"
+          />
         </View>
       </View>
 

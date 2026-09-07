@@ -14,6 +14,7 @@ export interface PositionData {
   realizedProfit: number;
   targetPrice?: number;
   stopLossPrice?: number;
+  trailingStopLossPoint?: number;
   strategyName?: string;
 }
 
@@ -88,6 +89,13 @@ export const PositionCard: React.FC<PositionCardProps> = ({ position, onClose })
           </Text>
         </View>
       </View>
+      
+      {position.trailingStopLossPoint !== undefined && position.trailingStopLossPoint > 0 && (
+        <View style={{ marginTop: 8, paddingTop: 8, borderTopWidth: 1, borderTopColor: COLORS.surfaceBorder, flexDirection: 'row', justifyContent: 'space-between' }}>
+          <Text style={{ fontSize: 11, color: COLORS.textMuted, fontWeight: '600' }}>Trailing SL Active:</Text>
+          <Text style={{ fontSize: 11, color: COLORS.text, fontWeight: '800' }}>Trail by ₹{position.trailingStopLossPoint.toFixed(1)}</Text>
+        </View>
+      )}
     </View>
   );
 };

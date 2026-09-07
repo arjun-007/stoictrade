@@ -125,6 +125,12 @@ namespace StoicTrade.Api.Services
 
                 var normalisedInstrument = NormaliseSymbol(signal.Instrument);
 
+                if (normalisedInstrument == "NIFTY")
+                {
+                    _logger.LogError("OrderManagementService [PAPER]: Failed to resolve tradeable option contract for {Strategy}. Aborting to prevent invalid NIFTY index trade.", signal.StrategyName);
+                    return;
+                }
+
                 // Always prioritize real-time live Market LTP at the exact moment of execution
                 decimal? currentLiveLtp = optionEngine.ResolveOptionLtp(normalisedInstrument);
                 decimal executionPrice = (currentLiveLtp.HasValue && currentLiveLtp.Value > 0)
@@ -193,6 +199,12 @@ namespace StoicTrade.Api.Services
             {
                 var knownPos = dbContext.PaperPositions.FirstOrDefault(p => p.StrategyName == signal.StrategyName && p.NetQty > 0);
                 if (knownPos != null) liveSymbol = knownPos.Symbol;
+            }
+
+            if (liveSymbol == "NIFTY")
+            {
+                _logger.LogError("OrderManagementService [LIVE]: Failed to resolve tradeable symbol for {Strategy}. Aborting LIVE execution on NIFTY index.", signal.StrategyName);
+                return;
             }
 
             string fyersAction = signal.Action == "EXIT" ? "SELL" : (signal.Action == "BUY_PE" ? "BUY" : signal.Action);

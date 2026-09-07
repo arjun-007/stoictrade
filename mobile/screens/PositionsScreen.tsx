@@ -5,6 +5,7 @@ import * as Haptics from 'expo-haptics';
 import { COLORS } from '../lib/theme';
 import { apiClient } from '../lib/api';
 import { PositionCard, PositionData } from '../components/PositionCard';
+import MorningConditionBanner from '../components/MorningConditionBanner';
 
 export const PositionsScreen: React.FC = () => {
   const [positions, setPositions] = useState<PositionData[]>([]);
@@ -71,6 +72,30 @@ export const PositionsScreen: React.FC = () => {
     );
   };
 
+  const handleEmergencySquareOff = () => {
+    Alert.alert(
+      'EMERGENCY SQUARE-OFF',
+      'This will instantly close ALL open positions at market price. Are you sure?',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'SQUARE-OFF ALL',
+          style: 'destructive',
+          onPress: async () => {
+            Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+            try {
+              await apiClient.post('/api/portfolio/emergency-squareoff');
+              Alert.alert('Emergency Stop Triggered', 'All positions squared off.');
+              fetchPositions();
+            } catch {
+              Alert.alert('Error', 'Failed to execute emergency square-off.');
+            }
+          },
+        },
+      ]
+    );
+  };
+
   const handleResetPaper = () => {
     Alert.alert(
       'Reset Paper Portfolio',
@@ -104,6 +129,8 @@ export const PositionsScreen: React.FC = () => {
       refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={COLORS.primary} />}
       contentContainerStyle={{ paddingBottom: 40 }}
     >
+      <MorningConditionBanner />
+
       {/* Mode & PnL Summary Header */}
       <View style={styles.summaryCard}>
         <View style={styles.summaryTop}>
@@ -130,6 +157,13 @@ export const PositionsScreen: React.FC = () => {
             {totalRealized >= 0 ? '+' : ''}₹{totalRealized.toFixed(2)}
           </Text>
         </View>
+
+        <TouchableOpacity 
+          style={{ marginTop: 12, backgroundColor: '#fee2e2', padding: 10, borderRadius: 8, alignItems: 'center', borderWidth: 1, borderColor: '#f87171' }}
+          onPress={handleEmergencySquareOff}
+        >
+          <Text style={{ color: '#b91c1c', fontWeight: 'bold', fontSize: 13 }}>🚨 EMERGENCY SQUARE-OFF ALL</Text>
+        </TouchableOpacity>
       </View>
 
       {/* Positions List */}

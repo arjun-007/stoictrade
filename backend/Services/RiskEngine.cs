@@ -8,6 +8,13 @@ using StoicTrade.Api.Services;
 
 namespace StoicTrade.Api.Services
 {
+    public class RiskEvaluationResult
+    {
+        public bool IsApproved { get; set; }
+        public string Status { get; set; } = "SignalOnly"; // AutoExecuted | AwaitingApproval | SignalOnly | Blocked | ExitSignal
+        public string? RejectionReason { get; set; }
+    }
+
     public class RiskEngine
     {
         private readonly ILogger<RiskEngine> _logger;
@@ -23,7 +30,7 @@ namespace StoicTrade.Api.Services
             _redisService = redisService;
         }
 
-        public async Task<bool> EvaluateAndExecuteAsync(Signal signal, string accountId = "default_account")
+        public async Task<RiskEvaluationResult> EvaluateAndExecuteAsync(Signal signal, string accountId = "default_account")
         {
             _logger.LogInformation("RiskEngine: Evaluating signal {StrategyName} {Action} {Instrument}", 
                 signal.StrategyName, signal.Action, signal.Instrument);
@@ -36,7 +43,12 @@ namespace StoicTrade.Api.Services
             if (await _redisService.IsLockedAsync($"kill_switch:{accountId}"))
             {
                 _logger.LogWarning("RiskEngine: Blocked. Kill switch is active for account {AccountId}", accountId);
-                return false;
+                return new RiskEvaluationResult
+                {
+                    IsApproved = false,
+                    Status = "Blocked",
+                    RejectionReason = $"Kill switch is active for account {accountId}"
+                };
             }
 
             // 2. Check Time Window
@@ -46,9 +58,14 @@ namespace StoicTrade.Api.Services
 
             if (currentTime < globalSettings.TradingWindowStart || currentTime > globalSettings.TradingWindowEnd)
             {
-                _logger.LogWarning("RiskEngine: Blocked. Current time {CurrentTime} is outside trading window ({Start}-{End})", 
-                    currentTime, globalSettings.TradingWindowStart, globalSettings.TradingWindowEnd);
-                return false;
+                string windowMsg = $"Outside trading window ({globalSettings.TradingWindowStart:hh\\:mm} - {globalSettings.TradingWindowEnd:hh\\:mm} IST)";
+                _logger.LogWarning("RiskEngine: Blocked. Current time {CurrentTime} is {WindowMsg}", currentTime, windowMsg);
+                return new RiskEvaluationResult
+                {
+                    IsApproved = false,
+                    Status = "Blocked",
+                    RejectionReason = windowMsg
+                };
             }
 
             // 3. Check VIX
@@ -57,15 +74,19 @@ namespace StoicTrade.Api.Services
             {
                 if ((decimal)currentVix < globalSettings.VixMinLimit || (decimal)currentVix > globalSettings.VixMaxLimit)
                 {
-                    _logger.LogWarning("RiskEngine: Blocked. VIX ({Vix}) is outside allowed limits ({Min}-{Max})", 
-                        currentVix, globalSettings.VixMinLimit, globalSettings.VixMaxLimit);
-                    return false;
+                    string vixMsg = $"VIX ({currentVix:F1}) outside allowed limits ({globalSettings.VixMinLimit} - {globalSettings.VixMaxLimit})";
+                    _logger.LogWarning("RiskEngine: Blocked. {VixMsg}", vixMsg);
+                    return new RiskEvaluationResult
+                    {
+                        IsApproved = false,
+                        Status = "Blocked",
+                        RejectionReason = vixMsg
+                    };
                 }
             }
             else
             {
-                _logger.LogWarning("RiskEngine: VIX data unavailable, skipping VIX check or blocking if strict mode.");
-                // Depending on strictness, we might return false here. For now, continue.
+                _logger.LogWarning("RiskEngine: VIX data unavailable, skipping VIX check.");
             }
 
             // 4. Instrument Rule: Only allow NIFTY Index / Options and Equity Stocks (EQ)
@@ -75,8 +96,14 @@ namespace StoicTrade.Api.Services
 
             if (!isNifty && !isEquity)
             {
-                _logger.LogWarning("RiskEngine: Blocked. Instrument {Instrument} not allowed.", instrument);
-                return false;
+                string instMsg = $"Instrument {instrument} not allowed";
+                _logger.LogWarning("RiskEngine: Blocked. {InstMsg}", instMsg);
+                return new RiskEvaluationResult
+                {
+                    IsApproved = false,
+                    Status = "Blocked",
+                    RejectionReason = instMsg
+                };
             }
 
             // 5. Check Operating Mode (Supports both StrategyGroups and StrategyConfigs)
@@ -84,37 +111,48 @@ namespace StoicTrade.Api.Services
 
             if (signal.StrategyName.StartsWith("Group: ", StringComparison.OrdinalIgnoreCase))
             {
-                // Find matching StrategyGroup
-                var activeGroups = dbContext.StrategyGroups.ToList();
-                var matchingGroup = activeGroups.FirstOrDefault(g => signal.StrategyName.Contains(g.Name, StringComparison.OrdinalIgnoreCase));
-                if (matchingGroup != null)
+                try
                 {
-                    operatingMode = matchingGroup.OperatingMode;
+                    var activeGroups = dbContext.StrategyGroups.ToList();
+                    var matchingGroup = activeGroups.FirstOrDefault(g => signal.StrategyName.Contains(g.Name, StringComparison.OrdinalIgnoreCase));
+                    if (matchingGroup != null)
+                    {
+                        operatingMode = matchingGroup.OperatingMode;
+                    }
                 }
+                catch { }
             }
             else
             {
-                // Check if any active StrategyGroup is running. If strategy groups are active, individual member strategies should NOT independently send alerts.
-                var activeGroups = dbContext.StrategyGroups.Where(g => g.IsEnabled).ToList();
-                var strat = dbContext.StrategyConfigs.FirstOrDefault(s => s.StrategyName == signal.StrategyName);
-                if (strat != null)
+                try
                 {
-                    bool isPartOfActiveGroup = activeGroups.Any(g => {
-                        try {
-                            var ids = System.Text.Json.JsonSerializer.Deserialize<System.Collections.Generic.List<int>>(g.StrategyIdsJson) ?? new();
-                            return ids.Contains(strat.Id);
-                        } catch { return false; }
-                    });
-
-                    // If it is part of an active squad and not explicitly enabled standalone, suppress individual alert
-                    if (isPartOfActiveGroup && !strat.IsEnabled)
+                    var activeGroups = dbContext.StrategyGroups.Where(g => g.IsEnabled).ToList();
+                    var strat = dbContext.StrategyConfigs.FirstOrDefault(s => s.StrategyName == signal.StrategyName);
+                    if (strat != null)
                     {
-                        _logger.LogInformation("RiskEngine: Suppressing standalone alert for {StrategyName} because it belongs to an active Strategy Group.", signal.StrategyName);
-                        return true;
-                    }
+                        bool isPartOfActiveGroup = activeGroups.Any(g => {
+                            try {
+                                var ids = System.Text.Json.JsonSerializer.Deserialize<System.Collections.Generic.List<int>>(g.StrategyIdsJson) ?? new();
+                                return ids.Contains(strat.Id);
+                            } catch { return false; }
+                        });
 
-                    operatingMode = strat.OperatingMode;
+                        // If it is part of an active squad and not explicitly enabled standalone, suppress individual alert
+                        if (isPartOfActiveGroup && !strat.IsEnabled)
+                        {
+                            _logger.LogInformation("RiskEngine: Suppressing standalone alert for {StrategyName} because it belongs to an active Strategy Group.", signal.StrategyName);
+                            return new RiskEvaluationResult
+                            {
+                                IsApproved = false,
+                                Status = "Blocked",
+                                RejectionReason = "Suppressed: Member of active squad"
+                            };
+                        }
+
+                        operatingMode = strat.OperatingMode;
+                    }
                 }
+                catch { }
             }
 
             // Position exits should always execute immediately to protect capital and close exposure
@@ -122,13 +160,21 @@ namespace StoicTrade.Api.Services
             {
                 _logger.LogInformation("RiskEngine: Signal Action is EXIT for {StrategyName} ({Instrument}). Executing immediate square-off.", signal.StrategyName, signal.Instrument);
                 await _orderManager.ExecuteOrderAsync(signal);
-                return true;
+                return new RiskEvaluationResult
+                {
+                    IsApproved = true,
+                    Status = "ExitSignal"
+                };
             }
 
             if (operatingMode == "SignalOnly")
             {
                 _logger.LogInformation("RiskEngine: Mode is SignalOnly. Logging signal but not executing.");
-                return true;
+                return new RiskEvaluationResult
+                {
+                    IsApproved = true,
+                    Status = "SignalOnly"
+                };
             }
             
             if (operatingMode == "ApprovalRequired")
@@ -137,13 +183,22 @@ namespace StoicTrade.Api.Services
                 var pendingSignalId = Guid.NewGuid().ToString();
                 var pendingSignalJson = System.Text.Json.JsonSerializer.Serialize(signal);
                 await _redisService.SetValueAsync($"pending_approval:{accountId}:{pendingSignalId}", pendingSignalJson, TimeSpan.FromMinutes(10));
-                return true;
+                return new RiskEvaluationResult
+                {
+                    IsApproved = true,
+                    Status = "AwaitingApproval"
+                };
             }
 
             // If all checks pass and mode is Automatic:
             _logger.LogInformation("RiskEngine: Signal APPROVED. Passing to Order Manager.");
             await _orderManager.ExecuteOrderAsync(signal);
-            return true;
+            return new RiskEvaluationResult
+            {
+                IsApproved = true,
+                Status = "AutoExecuted"
+            };
         }
+    }
     }
 }

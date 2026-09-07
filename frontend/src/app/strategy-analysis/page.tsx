@@ -44,6 +44,7 @@ interface SignalLogEntry {
   stopLossPrice?: number;
   quantity: number;
   status: string; // AutoExecuted | AwaitingApproval | SignalOnly | Blocked | ExitSignal
+  rejectionReason?: string;
   generatedAt: string;
   expiresAt?: string;
 }
@@ -829,7 +830,12 @@ export default function StrategyAnalysisPage() {
                               <span className={`px-2.5 py-0.5 text-xs font-bold rounded-md ${statusMeta.class}`}>
                                 {statusMeta.label}
                               </span>
-                              {entry.status !== "ExitSignal" && (
+                              {entry.status === "Blocked" && entry.rejectionReason && (
+                                <span className="text-[10px] font-semibold text-rose-600 dark:text-rose-400 bg-rose-50 dark:bg-rose-950/40 px-1.5 py-0.5 rounded max-w-[180px] truncate" title={entry.rejectionReason}>
+                                  {entry.rejectionReason}
+                                </span>
+                              )}
+                              {entry.status !== "ExitSignal" && entry.status !== "Blocked" && (
                                 <span className={`text-[10px] font-semibold px-1.5 py-0.2 rounded w-fit ${
                                   entry.expiresAt && new Date(entry.expiresAt).getTime() > Date.now()
                                     ? "text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/40"

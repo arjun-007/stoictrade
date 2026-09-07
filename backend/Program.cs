@@ -109,9 +109,39 @@ using (var scope = app.Services.CreateScope())
 
     try 
     {
-        dbContext.Database.ExecuteSqlRaw("ALTER TABLE GlobalSettings ADD COLUMN TradingWindowStart TEXT DEFAULT '09:30:00'");
+        dbContext.Database.ExecuteSqlRaw("ALTER TABLE GlobalSettings ADD COLUMN TradingWindowStart TEXT DEFAULT '09:15:00'");
         dbContext.Database.ExecuteSqlRaw("ALTER TABLE GlobalSettings ADD COLUMN TradingWindowEnd TEXT DEFAULT '15:10:00'");
     } 
+    catch {}
+
+    try
+    {
+        dbContext.Database.ExecuteSqlRaw(@"
+            CREATE TABLE IF NOT EXISTS ""StrategyGroups"" (
+                ""Id"" INTEGER NOT NULL CONSTRAINT ""PK_StrategyGroups"" PRIMARY KEY AUTOINCREMENT,
+                ""Name"" TEXT NOT NULL,
+                ""Description"" TEXT NOT NULL,
+                ""StrategyIdsJson"" TEXT NOT NULL,
+                ""ConsensusRule"" TEXT NOT NULL,
+                ""MinAgreeingStrategies"" INTEGER NOT NULL,
+                ""OperatingMode"" TEXT NOT NULL,
+                ""PerTradeStopLossPoint"" TEXT NOT NULL,
+                ""PerTradeGainPoint"" TEXT NOT NULL,
+                ""IsEnabled"" INTEGER NOT NULL
+            );
+        ");
+    }
+    catch {}
+
+    try
+    {
+        var settings = dbContext.GlobalSettings.FirstOrDefault();
+        if (settings != null && settings.TradingWindowStart == new TimeSpan(9, 30, 0))
+        {
+            settings.TradingWindowStart = new TimeSpan(9, 15, 0);
+            dbContext.SaveChanges();
+        }
+    }
     catch {}
 
     try
