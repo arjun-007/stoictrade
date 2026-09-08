@@ -54,7 +54,7 @@ namespace StoicTrade.Api.Services
                         decimal? exitLtp = optionEngine.ResolveOptionLtp(openPosition.Symbol);
                         decimal exitPrice = (exitLtp.HasValue && exitLtp.Value > 0)
                             ? exitLtp.Value
-                            : (openPosition.BuyAvg > 0 ? openPosition.BuyAvg : 150m);
+                            : ((openPosition.BuyAvg ?? 0m) > 0 ? (openPosition.BuyAvg ?? 0m) : 150m);
 
                         int exitQty = openPosition.NetQty;
                         openPosition.TotalSellQty += exitQty;
@@ -354,7 +354,7 @@ namespace StoicTrade.Api.Services
                 var openPositions = dbContext.PaperPositions.Where(p => p.NetQty != 0).ToList();
                 foreach (var pos in openPositions)
                 {
-                    decimal exitPrice = optionEngine.ResolveOptionLtp(pos.Symbol) ?? (pos.BuyAvg > 0 ? pos.BuyAvg : 150m);
+                    decimal exitPrice = optionEngine.ResolveOptionLtp(pos.Symbol) ?? ((pos.BuyAvg ?? 0m) > 0 ? (pos.BuyAvg ?? 0m) : 150m);
                     int exitQty = System.Math.Abs(pos.NetQty);
 
                     if (pos.NetQty > 0) // Long -> SELL to close

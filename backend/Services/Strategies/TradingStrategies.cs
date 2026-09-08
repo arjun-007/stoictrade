@@ -1087,7 +1087,7 @@ namespace StoicTrade.Api.Services.Strategies
                 if (StrategyFilterHelper.IsMiddayChopHours()) return null;
 
                 // BULLISH ENTRY
-                if (isBullishMitigating)
+                if (isBullishMitigating && latestBullishFvg != null)
                 {
                     if (!StrategyFilterHelper.CheckHtfGate(_aggregator, "BUY")) return null;
 
@@ -1118,7 +1118,7 @@ namespace StoicTrade.Api.Services.Strategies
                     };
                 }
                 // BEARISH ENTRY (PE)
-                else if (isBearishMitigating)
+                else if (isBearishMitigating && latestBearishFvg != null)
                 {
                     if (!StrategyFilterHelper.CheckHtfGate(_aggregator, "SELL")) return null;
 

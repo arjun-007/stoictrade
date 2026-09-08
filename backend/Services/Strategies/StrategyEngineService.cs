@@ -190,7 +190,9 @@ namespace StoicTrade.Api.Services.Strategies
                                         {
                                             signal.Instrument = openPos.Symbol;
                                             decimal? optLtp = optionEngine.ResolveOptionLtp(openPos.Symbol);
-                                            signal.Price = (optLtp.HasValue && optLtp.Value > 0) ? optLtp.Value : (openPos.BuyAvg > 0 ? openPos.BuyAvg : signal.Price);
+                                            signal.Price = (optLtp.HasValue && optLtp.Value > 0) 
+                                                ? optLtp.Value 
+                                                : ((openPos.BuyAvg ?? 0m) > 0 ? (openPos.BuyAvg ?? 0m) : signal.Price);
                                             signal.Quantity = openPos.NetQty;
                                             signal.TargetPrice = openPos.TargetPrice ?? 0;
                                             signal.StopLossPrice = openPos.StopLossPrice ?? 0;
