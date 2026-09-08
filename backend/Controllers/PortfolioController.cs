@@ -64,6 +64,20 @@ namespace StoicTrade.Api.Controllers
             var nowIst = ToIst(DateTime.UtcNow);
             var todayIst = nowIst.Date;
 
+            // 0. Auto-heal any NULL values in SQLite to prevent EF Core null-at-ordinal crashes
+            try
+            {
+                _dbContext.Database.ExecuteSqlRaw(@"
+                    UPDATE PaperPositions SET PeakLtp = '0' WHERE PeakLtp IS NULL;
+                    UPDATE PaperPositions SET SellAvg = '0' WHERE SellAvg IS NULL;
+                    UPDATE PaperPositions SET BuyAvg = '0' WHERE BuyAvg IS NULL;
+                    UPDATE PaperPositions SET RealizedProfit = '0' WHERE RealizedProfit IS NULL;
+                    UPDATE PaperPositions SET TotalBuyValue = '0' WHERE TotalBuyValue IS NULL;
+                    UPDATE PaperPositions SET TotalSellValue = '0' WHERE TotalSellValue IS NULL;
+                ");
+            }
+            catch {}
+
             // 1. Purge invalid test symbols
             var invalidPositions = _dbContext.PaperPositions
                 .Where(p => p.Symbol == "NIFTY" || (p.Symbol.StartsWith("NIFTY") && (p.Symbol.Contains("1300") || p.Symbol.Contains("1250") || p.Symbol.Contains("1350"))))
@@ -111,7 +125,7 @@ namespace StoicTrade.Api.Controllers
                 string canonicalSymbol = NormaliseOptionSymbol(firstPos.Symbol);
                 string strategyName = firstPos.StrategyName ?? "Strategy";
                 int netQty = group.Sum(p => p.NetQty);
-                decimal realizedProfit = group.Sum(p => p.RealizedProfit);
+                decimal realizedProfit = group.Sum(p => p.RealizedProfit ?? 0m);
                 var lastUpdatedIst = ToIst(group.Max(p => p.UpdatedAt)).Date;
 
                 // Only include:
@@ -125,11 +139,11 @@ namespace StoicTrade.Api.Controllers
                 // Priority: individual option price cache → spot data → last trade avg
                 decimal? cachedLtp = _marketDataCache.GetOptionPrice(canonicalSymbol);
                 
-                decimal buyAvg = group.FirstOrDefault(p => p.BuyAvg > 0 && p.BuyAvg < 5000)?.BuyAvg 
-                    ?? group.FirstOrDefault(p => p.BuyAvg > 0)?.BuyAvg 
+                decimal buyAvg = group.FirstOrDefault(p => (p.BuyAvg ?? 0m) > 0 && (p.BuyAvg ?? 0m) < 5000)?.BuyAvg 
+                    ?? group.FirstOrDefault(p => (p.BuyAvg ?? 0m) > 0)?.BuyAvg 
                     ?? 0m;
                     
-                decimal sellAvg = group.FirstOrDefault(p => p.SellAvg > 0 && p.SellAvg < 5000)?.SellAvg 
+                decimal sellAvg = group.FirstOrDefault(p => (p.SellAvg ?? 0m) > 0 && (p.SellAvg ?? 0m) < 5000)?.SellAvg 
                     ?? (cachedLtp.HasValue ? cachedLtp.Value : 0m);
 
                 // If sellAvg was stored as spot price (> 5000), fix it using option LTP
@@ -155,7 +169,7 @@ namespace StoicTrade.Api.Controllers
                 decimal stopLossPrice = group.FirstOrDefault(p => p.StopLossPrice.HasValue && p.StopLossPrice > 0)?.StopLossPrice 
                     ?? (buyAvg > 0 ? Math.Round(Math.Max(5.0m, buyAvg * 0.85m), 2) : 0m);
                 decimal trailingStopLossPoint = group.FirstOrDefault(p => p.TrailingStopLossPoint.HasValue && p.TrailingStopLossPoint > 0)?.TrailingStopLossPoint ?? 8.0m;
-                decimal peakLtp = group.Max(p => p.PeakLtp);
+                decimal peakLtp = group.Max(p => p.PeakLtp ?? 0m);
 
                 netPositions.Add(new {
                     symbol = canonicalSymbol,

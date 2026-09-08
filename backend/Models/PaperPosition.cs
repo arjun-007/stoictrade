@@ -9,17 +9,17 @@ namespace StoicTrade.Api.Models
         public string Id { get; set; } = Guid.NewGuid().ToString();
         public string Symbol { get; set; } = string.Empty;
         public int NetQty { get; set; }
-        public decimal BuyAvg { get; set; }
-        public decimal SellAvg { get; set; }
-        public decimal RealizedProfit { get; set; }
+        public decimal? BuyAvg { get; set; } = 0m;
+        public decimal? SellAvg { get; set; } = 0m;
+        public decimal? RealizedProfit { get; set; } = 0m;
         public int TotalBuyQty { get; set; }
         public int TotalSellQty { get; set; }
-        public decimal TotalBuyValue { get; set; }
-        public decimal TotalSellValue { get; set; }
+        public decimal? TotalBuyValue { get; set; } = 0m;
+        public decimal? TotalSellValue { get; set; } = 0m;
         public decimal? TargetPrice { get; set; }
         public decimal? StopLossPrice { get; set; }
         public decimal? TrailingStopLossPoint { get; set; }
-        public decimal PeakLtp { get; set; }
+        public decimal? PeakLtp { get; set; } = 0m;
         public string? StrategyName { get; set; }
         public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
         public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;

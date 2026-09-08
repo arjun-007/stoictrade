@@ -207,13 +207,30 @@ using (var scope = app.Services.CreateScope())
 
     try
     {
-        dbContext.Database.ExecuteSqlRaw("ALTER TABLE PaperPositions ADD COLUMN PeakLtp TEXT");
+        dbContext.Database.ExecuteSqlRaw("ALTER TABLE PaperPositions ADD COLUMN PeakLtp TEXT DEFAULT '0'");
     }
     catch {}
 
     try
     {
         dbContext.Database.ExecuteSqlRaw("ALTER TABLE PaperPositions ADD COLUMN StrategyName TEXT");
+    }
+    catch {}
+
+    // Sanitize any existing null values in PaperPositions to prevent EF Core null-at-ordinal exceptions
+    try
+    {
+        dbContext.Database.ExecuteSqlRaw(@"
+            UPDATE PaperPositions SET PeakLtp = '0' WHERE PeakLtp IS NULL;
+            UPDATE PaperPositions SET SellAvg = '0' WHERE SellAvg IS NULL;
+            UPDATE PaperPositions SET BuyAvg = '0' WHERE BuyAvg IS NULL;
+            UPDATE PaperPositions SET RealizedProfit = '0' WHERE RealizedProfit IS NULL;
+            UPDATE PaperPositions SET TotalBuyValue = '0' WHERE TotalBuyValue IS NULL;
+            UPDATE PaperPositions SET TotalSellValue = '0' WHERE TotalSellValue IS NULL;
+            UPDATE PaperPositions SET NetQty = 0 WHERE NetQty IS NULL;
+            UPDATE PaperPositions SET TotalBuyQty = 0 WHERE TotalBuyQty IS NULL;
+            UPDATE PaperPositions SET TotalSellQty = 0 WHERE TotalSellQty IS NULL;
+        ");
     }
     catch {}
 

@@ -58,10 +58,10 @@ namespace StoicTrade.Api.Services
 
                         int exitQty = openPosition.NetQty;
                         openPosition.TotalSellQty += exitQty;
-                        openPosition.TotalSellValue += exitQty * exitPrice;
-                        openPosition.SellAvg = openPosition.TotalSellQty > 0 ? openPosition.TotalSellValue / openPosition.TotalSellQty : exitPrice;
+                        openPosition.TotalSellValue = (openPosition.TotalSellValue ?? 0m) + (exitQty * exitPrice);
+                        openPosition.SellAvg = openPosition.TotalSellQty > 0 ? (openPosition.TotalSellValue ?? 0m) / openPosition.TotalSellQty : exitPrice;
                         openPosition.NetQty = 0;
-                        openPosition.RealizedProfit += (openPosition.TotalSellValue - openPosition.TotalBuyValue);
+                        openPosition.RealizedProfit = (openPosition.RealizedProfit ?? 0m) + ((openPosition.TotalSellValue ?? 0m) - (openPosition.TotalBuyValue ?? 0m));
                         openPosition.UpdatedAt = System.DateTime.UtcNow;
 
                         dbContext.TradeLogs.Add(new TradeLog
@@ -157,7 +157,15 @@ namespace StoicTrade.Api.Services
                     position = new PaperPosition 
                     { 
                         Symbol = normalisedInstrument,
-                        StrategyName = signal.StrategyName
+                        StrategyName = signal.StrategyName,
+                        BuyAvg = 0m,
+                        SellAvg = 0m,
+                        RealizedProfit = 0m,
+                        TotalBuyQty = 0,
+                        TotalSellQty = 0,
+                        TotalBuyValue = 0m,
+                        TotalSellValue = 0m,
+                        PeakLtp = executionPrice
                     };
                     dbContext.PaperPositions.Add(position);
                 }
@@ -168,8 +176,8 @@ namespace StoicTrade.Api.Services
                     : (globalSettings?.TrailingStopLossPoint ?? 8.0m);
 
                 position.TotalBuyQty += signal.Quantity;
-                position.TotalBuyValue += signal.Quantity * executionPrice;
-                position.BuyAvg = position.TotalBuyQty > 0 ? position.TotalBuyValue / position.TotalBuyQty : executionPrice;
+                position.TotalBuyValue = (position.TotalBuyValue ?? 0m) + (signal.Quantity * executionPrice);
+                position.BuyAvg = position.TotalBuyQty > 0 ? (position.TotalBuyValue ?? 0m) / position.TotalBuyQty : executionPrice;
                 position.NetQty += signal.Quantity;
                 position.PeakLtp = executionPrice;
                 position.TrailingStopLossPoint = trailingSl > 0 ? trailingSl : 8.0m;
@@ -235,8 +243,8 @@ namespace StoicTrade.Api.Services
                 decimal currentLtp = ltp.Value;
 
                 // 1. Trailing Stop Loss
-                if (pos.PeakLtp <= 0) pos.PeakLtp = pos.BuyAvg > 0 ? pos.BuyAvg : currentLtp;
-                if (currentLtp > pos.PeakLtp)
+                if ((pos.PeakLtp ?? 0m) <= 0) pos.PeakLtp = (pos.BuyAvg ?? 0m) > 0 ? pos.BuyAvg : currentLtp;
+                if (currentLtp > (pos.PeakLtp ?? 0m))
                 {
                     pos.PeakLtp = currentLtp;
                     hasChanges = true;
@@ -247,7 +255,7 @@ namespace StoicTrade.Api.Services
 
                     if (trailingPts > 0)
                     {
-                        decimal trailedSl = System.Math.Round(pos.PeakLtp - trailingPts, 2);
+                        decimal trailedSl = System.Math.Round((pos.PeakLtp ?? currentLtp) - trailingPts, 2);
                         if (trailedSl > (pos.StopLossPrice ?? 0))
                         {
                             pos.StopLossPrice = trailedSl;
@@ -270,10 +278,10 @@ namespace StoicTrade.Api.Services
 
                     int exitQty = pos.NetQty;
                     pos.TotalSellQty += exitQty;
-                    pos.TotalSellValue += exitQty * currentLtp;
-                    pos.SellAvg = pos.TotalSellQty > 0 ? pos.TotalSellValue / pos.TotalSellQty : currentLtp;
+                    pos.TotalSellValue = (pos.TotalSellValue ?? 0m) + (exitQty * currentLtp);
+                    pos.SellAvg = pos.TotalSellQty > 0 ? (pos.TotalSellValue ?? 0m) / pos.TotalSellQty : currentLtp;
                     pos.NetQty = 0;
-                    pos.RealizedProfit += (pos.TotalSellValue - pos.TotalBuyValue);
+                    pos.RealizedProfit = (pos.RealizedProfit ?? 0m) + ((pos.TotalSellValue ?? 0m) - (pos.TotalBuyValue ?? 0m));
                     pos.UpdatedAt = System.DateTime.UtcNow;
                     hasChanges = true;
 
@@ -352,18 +360,18 @@ namespace StoicTrade.Api.Services
                     if (pos.NetQty > 0) // Long -> SELL to close
                     {
                         pos.TotalSellQty += exitQty;
-                        pos.TotalSellValue += exitQty * exitPrice;
-                        pos.SellAvg = pos.TotalSellQty > 0 ? pos.TotalSellValue / pos.TotalSellQty : exitPrice;
+                        pos.TotalSellValue = (pos.TotalSellValue ?? 0m) + (exitQty * exitPrice);
+                        pos.SellAvg = pos.TotalSellQty > 0 ? (pos.TotalSellValue ?? 0m) / pos.TotalSellQty : exitPrice;
                     }
                     else if (pos.NetQty < 0) // Short -> BUY to close
                     {
                         pos.TotalBuyQty += exitQty;
-                        pos.TotalBuyValue += exitQty * exitPrice;
-                        pos.BuyAvg = pos.TotalBuyQty > 0 ? pos.TotalBuyValue / pos.TotalBuyQty : exitPrice;
+                        pos.TotalBuyValue = (pos.TotalBuyValue ?? 0m) + (exitQty * exitPrice);
+                        pos.BuyAvg = pos.TotalBuyQty > 0 ? (pos.TotalBuyValue ?? 0m) / pos.TotalBuyQty : exitPrice;
                     }
 
                     pos.NetQty = 0;
-                    pos.RealizedProfit += (pos.TotalSellValue - pos.TotalBuyValue);
+                    pos.RealizedProfit = (pos.RealizedProfit ?? 0m) + ((pos.TotalSellValue ?? 0m) - (pos.TotalBuyValue ?? 0m));
                     pos.UpdatedAt = System.DateTime.UtcNow;
                     closedCount++;
 

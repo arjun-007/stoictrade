@@ -67,26 +67,27 @@ namespace StoicTrade.Api.Controllers
 
                 if (request.OrderType == "BUY")
                 {
-                    decimal totalVal = (position.BuyAvg * position.TotalBuyQty) + (trade.ExecutionPrice * request.Quantity);
+                    decimal totalVal = ((position.BuyAvg ?? 0m) * position.TotalBuyQty) + (trade.ExecutionPrice * request.Quantity);
                     position.TotalBuyQty += request.Quantity;
-                    position.BuyAvg = totalVal / position.TotalBuyQty;
+                    position.BuyAvg = position.TotalBuyQty > 0 ? totalVal / position.TotalBuyQty : trade.ExecutionPrice;
                     position.NetQty += request.Quantity;
-                    position.TotalBuyValue += trade.ExecutionPrice * request.Quantity;
+                    position.TotalBuyValue = (position.TotalBuyValue ?? 0m) + (trade.ExecutionPrice * request.Quantity);
+                    position.PeakLtp = trade.ExecutionPrice;
                     position.StrategyName = "Manual Entry";
                     position.TargetPrice = Math.Round(trade.ExecutionPrice * 1.25m, 2);
                     position.StopLossPrice = Math.Round(Math.Max(5.0m, trade.ExecutionPrice * 0.85m), 2);
                 }
                 else
                 {
-                    decimal totalVal = (position.SellAvg * position.TotalSellQty) + (trade.ExecutionPrice * request.Quantity);
+                    decimal totalVal = ((position.SellAvg ?? 0m) * position.TotalSellQty) + (trade.ExecutionPrice * request.Quantity);
                     position.TotalSellQty += request.Quantity;
-                    position.SellAvg = totalVal / position.TotalSellQty;
+                    position.SellAvg = position.TotalSellQty > 0 ? totalVal / position.TotalSellQty : trade.ExecutionPrice;
                     position.NetQty -= request.Quantity;
-                    position.TotalSellValue += trade.ExecutionPrice * request.Quantity;
+                    position.TotalSellValue = (position.TotalSellValue ?? 0m) + (trade.ExecutionPrice * request.Quantity);
                     
                     if (position.NetQty >= 0)
                     {
-                        position.RealizedProfit += (trade.ExecutionPrice - position.BuyAvg) * request.Quantity;
+                        position.RealizedProfit = (position.RealizedProfit ?? 0m) + (trade.ExecutionPrice - (position.BuyAvg ?? 0m)) * request.Quantity;
                     }
                 }
 
