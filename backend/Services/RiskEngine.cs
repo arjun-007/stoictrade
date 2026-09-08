@@ -159,11 +159,12 @@ namespace StoicTrade.Api.Services
             if (signal.Action == "EXIT")
             {
                 _logger.LogInformation("RiskEngine: Signal Action is EXIT for {StrategyName} ({Instrument}). Executing immediate square-off.", signal.StrategyName, signal.Instrument);
-                await _orderManager.ExecuteOrderAsync(signal);
+                bool exitOk = await _orderManager.ExecuteOrderAsync(signal);
                 return new RiskEvaluationResult
                 {
-                    IsApproved = true,
-                    Status = "ExitSignal"
+                    IsApproved = exitOk,
+                    Status = exitOk ? "ExitSignal" : "Blocked",
+                    RejectionReason = exitOk ? null : "No matching open position to exit"
                 };
             }
 
@@ -192,7 +193,18 @@ namespace StoicTrade.Api.Services
 
             // If all checks pass and mode is Automatic:
             _logger.LogInformation("RiskEngine: Signal APPROVED. Passing to Order Manager.");
-            await _orderManager.ExecuteOrderAsync(signal);
+            bool executed = await _orderManager.ExecuteOrderAsync(signal);
+            if (!executed)
+            {
+                _logger.LogWarning("RiskEngine: Order execution failed or was aborted by Order Manager for {StrategyName}", signal.StrategyName);
+                return new RiskEvaluationResult
+                {
+                    IsApproved = false,
+                    Status = "Blocked",
+                    RejectionReason = "Order execution failed or unable to resolve contract"
+                };
+            }
+
             return new RiskEvaluationResult
             {
                 IsApproved = true,

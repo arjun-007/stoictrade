@@ -20,12 +20,21 @@ namespace StoicTrade.Api.Controllers
         private readonly FyersApiService _fyersApi;
         private readonly AppDbContext _dbContext;
         private readonly MarketDataCache _marketDataCache;
+        private readonly ILogger<PortfolioController> _logger;
 
-        public PortfolioController(FyersApiService fyersApi, AppDbContext dbContext, MarketDataCache marketDataCache)
+        public PortfolioController(FyersApiService fyersApi, AppDbContext dbContext, MarketDataCache marketDataCache, ILogger<PortfolioController> logger)
         {
             _fyersApi = fyersApi;
             _dbContext = dbContext;
             _marketDataCache = marketDataCache;
+            _logger = logger;
+        }
+
+        private static DateTime ToIst(DateTime date)
+        {
+            var ist = TimeZoneHelper.GetIstTimeZone();
+            var utc = DateTime.SpecifyKind(date, DateTimeKind.Utc);
+            return TimeZoneInfo.ConvertTimeFromUtc(utc, ist);
         }
 
         private bool IsPaperMode()
@@ -52,8 +61,7 @@ namespace StoicTrade.Api.Controllers
 
         private (decimal totalPnL, int activeCount, List<object> mockNetPositions) GetMockPaperData()
         {
-            var ist = TimeZoneHelper.GetIstTimeZone();
-            var nowIst = TimeZoneInfo.ConvertTimeFromUtc(DateTime.UtcNow, ist);
+            var nowIst = ToIst(DateTime.UtcNow);
             var todayIst = nowIst.Date;
 
             // 1. Purge invalid test symbols
@@ -69,7 +77,7 @@ namespace StoicTrade.Api.Controllers
             // 2. Purge past days' closed trades (NetQty == 0 and Updated before today IST) to keep DB healthy and lightweight
             var staleClosedPositions = _dbContext.PaperPositions
                 .AsEnumerable()
-                .Where(p => p.NetQty == 0 && TimeZoneInfo.ConvertTimeFromUtc(p.UpdatedAt, ist).Date < todayIst)
+                .Where(p => p.NetQty == 0 && ToIst(p.UpdatedAt).Date < todayIst)
                 .ToList();
 
             if (staleClosedPositions.Any())
@@ -104,7 +112,7 @@ namespace StoicTrade.Api.Controllers
                 string strategyName = firstPos.StrategyName ?? "Strategy";
                 int netQty = group.Sum(p => p.NetQty);
                 decimal realizedProfit = group.Sum(p => p.RealizedProfit);
-                var lastUpdatedIst = TimeZoneInfo.ConvertTimeFromUtc(group.Max(p => p.UpdatedAt), ist).Date;
+                var lastUpdatedIst = ToIst(group.Max(p => p.UpdatedAt)).Date;
 
                 // Only include:
                 // a) Open / Carry-forward positions (netQty != 0)
@@ -165,7 +173,7 @@ namespace StoicTrade.Api.Controllers
                     pl = realizedProfit + unrealized,
                     slNo = 1,
                     id = firstPos.Id,
-                    isCarryForward = netQty != 0 && TimeZoneInfo.ConvertTimeFromUtc(group.Min(p => p.CreatedAt), ist).Date < todayIst
+                    isCarryForward = netQty != 0 && ToIst(group.Min(p => p.CreatedAt)).Date < todayIst
                 });
 
                 totalPnL += (realizedProfit + unrealized);
@@ -178,55 +186,69 @@ namespace StoicTrade.Api.Controllers
         [HttpGet("summary")]
         public async Task<IActionResult> GetSummary()
         {
-            if (IsPaperMode())
+            try
             {
-                var mockData = GetMockPaperData();
-                return Ok(new
+                if (IsPaperMode())
                 {
-                    AvailableMargin = 1000000.00m, // Dummy fixed paper margin
-                    DailyPnL = mockData.totalPnL,
-                    ActivePositionsCount = mockData.activeCount
-                });
-            }
-
-            var funds = await _fyersApi.GetFundsAsync();
-            var positions = await _fyersApi.GetPositionsAsync();
-            
-            decimal availableMargin = 0;
-            decimal totalPnL = 0;
-            int activePositionsCount = 0;
-
-            if (funds.ValueKind != JsonValueKind.Undefined && funds.TryGetProperty("fund_limit", out var fundLimitArray))
-            {
-                foreach (var fund in fundLimitArray.EnumerateArray())
-                {
-                    if (fund.TryGetProperty("title", out var titleProp) && titleProp.GetString() == "Available Balance")
+                    var mockData = GetMockPaperData();
+                    return Ok(new
                     {
-                        availableMargin = fund.GetProperty("equityAmount").GetDecimal();
-                        break;
+                        AvailableMargin = 1000000.00m, // Dummy fixed paper margin
+                        DailyPnL = mockData.totalPnL,
+                        ActivePositionsCount = mockData.activeCount
+                    });
+                }
+
+                var funds = await _fyersApi.GetFundsAsync();
+                var positions = await _fyersApi.GetPositionsAsync();
+                
+                decimal availableMargin = 0;
+                decimal totalPnL = 0;
+                int activePositionsCount = 0;
+
+                if (funds.ValueKind != JsonValueKind.Undefined && funds.TryGetProperty("fund_limit", out var fundLimitArray))
+                {
+                    foreach (var fund in fundLimitArray.EnumerateArray())
+                    {
+                        if (fund.TryGetProperty("title", out var titleProp) && titleProp.GetString() == "Available Balance")
+                        {
+                            availableMargin = fund.GetProperty("equityAmount").GetDecimal();
+                            break;
+                        }
                     }
                 }
-            }
 
-            if (positions.ValueKind != JsonValueKind.Undefined && positions.TryGetProperty("netPositions", out var netPositionsArray))
-            {
-                foreach (var pos in netPositionsArray.EnumerateArray())
+                if (positions.ValueKind != JsonValueKind.Undefined && positions.TryGetProperty("netPositions", out var netPositionsArray))
                 {
-                    decimal realized = pos.TryGetProperty("realized_profit", out var r) ? r.GetDecimal() : 0;
-                    decimal unrealized = pos.TryGetProperty("unrealized_profit", out var ur) ? ur.GetDecimal() : 0;
-                    totalPnL += (realized + unrealized);
+                    foreach (var pos in netPositionsArray.EnumerateArray())
+                    {
+                        decimal realized = pos.TryGetProperty("realized_profit", out var r) ? r.GetDecimal() : 0;
+                        decimal unrealized = pos.TryGetProperty("unrealized_profit", out var ur) ? ur.GetDecimal() : 0;
+                        totalPnL += (realized + unrealized);
 
-                    int netQty = pos.TryGetProperty("netQty", out var q) ? q.GetInt32() : 0;
-                    if (netQty != 0) activePositionsCount++;
+                        int netQty = pos.TryGetProperty("netQty", out var q) ? q.GetInt32() : 0;
+                        if (netQty != 0) activePositionsCount++;
+                    }
                 }
-            }
 
-            return Ok(new
+                return Ok(new
+                {
+                    AvailableMargin = availableMargin,
+                    DailyPnL = totalPnL,
+                    ActivePositionsCount = activePositionsCount
+                });
+            }
+            catch (Exception ex)
             {
-                AvailableMargin = availableMargin,
-                DailyPnL = totalPnL,
-                ActivePositionsCount = activePositionsCount
-            });
+                _logger.LogError(ex, "Failed to get portfolio summary");
+                return Ok(new
+                {
+                    AvailableMargin = 1000000.00m,
+                    DailyPnL = 0m,
+                    ActivePositionsCount = 0,
+                    error = ex.Message
+                });
+            }
         }
 
         [HttpGet("positions")]
@@ -249,6 +271,7 @@ namespace StoicTrade.Api.Controllers
             }
             catch (Exception ex)
             {
+                _logger.LogError(ex, "Failed to get positions");
                 return Ok(new { netPositions = new List<object>(), error = ex.Message });
             }
         }

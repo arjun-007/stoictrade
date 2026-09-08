@@ -29,14 +29,16 @@ namespace StoicTrade.Api.Services
             return s;
         }
 
-        public async Task ExecuteOrderAsync(Signal signal)
+        public async Task<bool> ExecuteOrderAsync(Signal signal)
         {
             using var scope = _serviceProvider.CreateScope();
             var dbContext = scope.ServiceProvider.GetRequiredService<StoicTrade.Api.Data.AppDbContext>();
-            var globalSettings = dbContext.GlobalSettings.FirstOrDefault();
+            var globalSettings = dbContext.GlobalSettings.FirstOrDefault() ?? new GlobalSettings { TradeMode = "Paper" };
             var optionEngine = scope.ServiceProvider.GetRequiredService<StoicTrade.Api.Services.Strategies.OptionSelectionEngine>();
 
-            if (globalSettings != null && globalSettings.TradeMode == "Paper")
+            bool isPaperMode = string.Equals(globalSettings.TradeMode, "Paper", System.StringComparison.OrdinalIgnoreCase);
+
+            if (isPaperMode)
             {
                 // 1. Intercept EXIT action to cleanly close existing position
                 if (signal.Action == "EXIT")
@@ -89,13 +91,13 @@ namespace StoicTrade.Api.Services
                                 await redis.DeleteKeyAsync($"strategy_state_{strat.Id}");
                             }
                         }
-                        return;
+                        return true;
                     }
                     else
                     {
                         _logger.LogWarning("OrderManagementService [PAPER]: EXIT signal for {Strategy} ({Instrument}) received, but no active open position was found. Skipping to prevent phantom sell order.",
                             signal.StrategyName, signal.Instrument);
-                        return;
+                        return false;
                     }
                 }
 
@@ -114,7 +116,9 @@ namespace StoicTrade.Api.Services
                 // If instrument is raw NIFTY or missing option type, resolve optimal ITM contract
                 if (signal.Instrument == "NIFTY" || (!signal.Instrument.Contains("CE") && !signal.Instrument.Contains("PE")))
                 {
-                    var contract = optionEngine.GetOptimalContract("NIFTY", bias, itmDistance: 1, expiryIndex: 1)
+                    var contract = optionEngine.GetOptimalContract("NIFTY", bias, itmDistance: 1, expiryIndex: 2)
+                        ?? optionEngine.GetOptimalContract("NIFTY", bias, itmDistance: 1, expiryIndex: 1)
+                        ?? optionEngine.GetOptimalContract("NIFTY", bias, itmDistance: 0, expiryIndex: 1)
                         ?? optionEngine.GetOptimalContract("NIFTY", bias, itmDistance: 1, expiryIndex: 0);
 
                     if (!string.IsNullOrEmpty(contract))
@@ -128,7 +132,7 @@ namespace StoicTrade.Api.Services
                 if (normalisedInstrument == "NIFTY")
                 {
                     _logger.LogError("OrderManagementService [PAPER]: Failed to resolve tradeable option contract for {Strategy}. Aborting to prevent invalid NIFTY index trade.", signal.StrategyName);
-                    return;
+                    return false;
                 }
 
                 // Always prioritize real-time live Market LTP at the exact moment of execution
@@ -187,7 +191,7 @@ namespace StoicTrade.Api.Services
                 });
 
                 await dbContext.SaveChangesAsync();
-                return;
+                return true;
             }
 
             // LIVE Trading Mode
@@ -204,11 +208,12 @@ namespace StoicTrade.Api.Services
             if (liveSymbol == "NIFTY")
             {
                 _logger.LogError("OrderManagementService [LIVE]: Failed to resolve tradeable symbol for {Strategy}. Aborting LIVE execution on NIFTY index.", signal.StrategyName);
-                return;
+                return false;
             }
 
             string fyersAction = signal.Action == "EXIT" ? "SELL" : (signal.Action == "BUY_PE" ? "BUY" : signal.Action);
             await _fyersApiService.PlaceOrderAsync(liveSymbol, fyersAction, signal.Quantity, signal.ExpectedPrice);
+            return true;
         }
 
         public async Task MonitorActivePositionsAsync(System.IServiceProvider serviceProvider)

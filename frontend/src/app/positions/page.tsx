@@ -124,6 +124,9 @@ export default function PositionsPage() {
 
       if (posRes && posRes.ok) {
         const data = await posRes.json();
+        if (data.error) {
+          console.error("Portfolio positions API error:", data.error);
+        }
         if (data.netPositions) {
           data.netPositions.forEach((p: any) => {
             const qty = Math.abs(p.netQty ?? 0);
