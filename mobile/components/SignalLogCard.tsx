@@ -2,6 +2,7 @@ import React from 'react';
 import { View, Text, StyleSheet } from 'react-native';
 import { TrendingUp, TrendingDown, Clock, LogOut } from 'lucide-react-native';
 import { COLORS } from '../lib/theme';
+import { formatInstrumentName } from '../lib/formatters';
 
 export interface SignalLogData {
   id: string;
@@ -25,6 +26,7 @@ export const SignalLogCard: React.FC<SignalLogCardProps> = ({ signal }) => {
   const isBuy = signal.action === 'BUY' || signal.action === 'BUY_CE';
   const isBuyPe = signal.action === 'BUY_PE';
   const isExit = signal.action === 'EXIT';
+  const formattedInstrument = formatInstrumentName(signal.instrument);
   
   const isExpired = signal.expiresAt
     ? new Date(signal.expiresAt).getTime() < Date.now()
@@ -94,7 +96,7 @@ export const SignalLogCard: React.FC<SignalLogCardProps> = ({ signal }) => {
           </Text>
         </View>
 
-        <Text style={styles.instrumentText}>{signal.instrument}</Text>
+        <Text style={styles.instrumentText}>{formattedInstrument}</Text>
       </View>
 
       {/* Price & Risk Parameters */}

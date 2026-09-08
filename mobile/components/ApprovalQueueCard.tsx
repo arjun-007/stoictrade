@@ -3,6 +3,7 @@ import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
 import { Check, X, Bell, Clock, ShieldAlert } from 'lucide-react-native';
 import * as Haptics from 'expo-haptics';
 import { COLORS } from '../lib/theme';
+import { formatInstrumentName } from '../lib/formatters';
 
 export interface PendingSignal {
   id: string;
@@ -31,6 +32,7 @@ export const ApprovalQueueCard: React.FC<ApprovalQueueCardProps> = ({
 }) => {
   const { signal, id } = item;
   const isBuy = signal.action === 'BUY';
+  const formattedInstrument = formatInstrumentName(signal.instrument);
 
   const handleApprove = async () => {
     await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
@@ -63,7 +65,7 @@ export const ApprovalQueueCard: React.FC<ApprovalQueueCardProps> = ({
             {signal.action}
           </Text>
         </View>
-        <Text style={styles.instrumentText}>{signal.instrument}</Text>
+        <Text style={styles.instrumentText}>{formattedInstrument}</Text>
       </View>
 
       <View style={styles.metricsGrid}>

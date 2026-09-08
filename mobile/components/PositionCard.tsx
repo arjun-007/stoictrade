@@ -1,8 +1,9 @@
 import React from 'react';
 import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
-import { Briefcase, TrendingUp, TrendingDown, XCircle } from 'lucide-react-native';
+import { Briefcase, TrendingUp, TrendingDown, XCircle, CheckCircle2 } from 'lucide-react-native';
 import * as Haptics from 'expo-haptics';
 import { COLORS } from '../lib/theme';
+import { formatInstrumentName } from '../lib/formatters';
 
 export interface PositionData {
   symbol: string;
@@ -16,6 +17,8 @@ export interface PositionData {
   stopLossPrice?: number;
   trailingStopLossPoint?: number;
   strategyName?: string;
+  status?: 'ACTIVE' | 'EXITED';
+  category?: 'DAY' | 'HOLDING';
 }
 
 interface PositionCardProps {
@@ -24,9 +27,12 @@ interface PositionCardProps {
 }
 
 export const PositionCard: React.FC<PositionCardProps> = ({ position, onClose }) => {
+  const isExited = position.netQty === 0 || position.status === 'EXITED';
   const isLong = position.netQty > 0;
-  const isProfit = position.unrealizedPnL >= 0;
+  const isProfit = isExited ? (position.realizedProfit >= 0) : (position.unrealizedPnL >= 0);
+  const displayPnL = isExited ? position.realizedProfit : position.unrealizedPnL;
   const currentLtp = position.ltp > 0 ? position.ltp : (position.buyAvg || 150);
+  const formattedName = formatInstrumentName(position.symbol);
 
   const handleClose = () => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
@@ -34,19 +40,22 @@ export const PositionCard: React.FC<PositionCardProps> = ({ position, onClose })
   };
 
   return (
-    <View style={styles.card}>
+    <View style={[styles.card, isExited && styles.cardExited]}>
       {/* Top Header */}
       <View style={styles.topRow}>
         <View style={styles.symbolArea}>
-          <Text style={styles.symbol}>{position.symbol}</Text>
+          <Text style={styles.symbol}>{formattedName}</Text>
+          {formattedName !== position.symbol ? (
+            <Text style={styles.rawSymbolTag}>{position.symbol}</Text>
+          ) : null}
           {position.strategyName ? (
             <Text style={styles.strategyTag} numberOfLines={1}>{position.strategyName}</Text>
           ) : null}
         </View>
 
-        <View style={[styles.qtyBadge, isLong ? styles.badgeLong : styles.badgeShort]}>
-          <Text style={[styles.qtyText, isLong ? styles.textLong : styles.textShort]}>
-            {isLong ? 'LONG' : 'SHORT'} {position.netQty}
+        <View style={[styles.qtyBadge, isExited ? styles.badgeExited : isLong ? styles.badgeLong : styles.badgeShort]}>
+          <Text style={[styles.qtyText, isExited ? styles.textExited : isLong ? styles.textLong : styles.textShort]}>
+            {isExited ? 'EXITED' : `${isLong ? 'LONG' : 'SHORT'} ${position.netQty}`}
           </Text>
         </View>
       </View>
@@ -54,16 +63,23 @@ export const PositionCard: React.FC<PositionCardProps> = ({ position, onClose })
       {/* Main P&L Callout */}
       <View style={styles.pnlRow}>
         <View>
-          <Text style={styles.pnlLabel}>Unrealized P&L</Text>
+          <Text style={styles.pnlLabel}>{isExited ? 'Realized P&L' : 'Unrealized P&L'}</Text>
           <Text style={[styles.pnlValue, isProfit ? styles.textProfit : styles.textLoss]}>
-            {isProfit ? '+' : ''}₹{position.unrealizedPnL.toFixed(2)}
+            {isProfit ? '+' : ''}₹{displayPnL.toFixed(2)}
           </Text>
         </View>
 
-        <TouchableOpacity style={styles.exitBtn} onPress={handleClose} activeOpacity={0.8}>
-          <XCircle size={15} color="#ffffff" />
-          <Text style={styles.exitBtnText}>Exit</Text>
-        </TouchableOpacity>
+        {!isExited ? (
+          <TouchableOpacity style={styles.exitBtn} onPress={handleClose} activeOpacity={0.8}>
+            <XCircle size={15} color="#ffffff" />
+            <Text style={styles.exitBtnText}>Exit</Text>
+          </TouchableOpacity>
+        ) : (
+          <View style={styles.closedBadge}>
+            <CheckCircle2 size={14} color={COLORS.textMuted} />
+            <Text style={styles.closedText}>Closed</Text>
+          </View>
+        )}
       </View>
 
       {/* Stats Breakdown */}
@@ -73,8 +89,8 @@ export const PositionCard: React.FC<PositionCardProps> = ({ position, onClose })
           <Text style={styles.statValue}>₹{position.buyAvg.toFixed(2)}</Text>
         </View>
         <View style={styles.statItem}>
-          <Text style={styles.statLabel}>Current LTP</Text>
-          <Text style={styles.statValue}>₹{currentLtp.toFixed(2)}</Text>
+          <Text style={styles.statLabel}>{isExited ? 'Exit Avg' : 'Current LTP'}</Text>
+          <Text style={styles.statValue}>₹{(isExited && position.sellAvg > 0 ? position.sellAvg : currentLtp).toFixed(2)}</Text>
         </View>
         <View style={styles.statItem}>
           <Text style={styles.statLabel}>Target</Text>
@@ -90,7 +106,7 @@ export const PositionCard: React.FC<PositionCardProps> = ({ position, onClose })
         </View>
       </View>
       
-      {position.trailingStopLossPoint !== undefined && position.trailingStopLossPoint > 0 && (
+      {!isExited && position.trailingStopLossPoint !== undefined && position.trailingStopLossPoint > 0 && (
         <View style={{ marginTop: 8, paddingTop: 8, borderTopWidth: 1, borderTopColor: COLORS.surfaceBorder, flexDirection: 'row', justifyContent: 'space-between' }}>
           <Text style={{ fontSize: 11, color: COLORS.textMuted, fontWeight: '600' }}>Trailing SL Active:</Text>
           <Text style={{ fontSize: 11, color: COLORS.text, fontWeight: '800' }}>Trail by ₹{position.trailingStopLossPoint.toFixed(1)}</Text>
@@ -110,6 +126,10 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: COLORS.surfaceBorder,
   },
+  cardExited: {
+    opacity: 0.85,
+    backgroundColor: 'rgba(30, 41, 59, 0.4)',
+  },
   topRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -123,6 +143,12 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '800',
     color: COLORS.text,
+  },
+  rawSymbolTag: {
+    fontSize: 11,
+    color: COLORS.textSubtle,
+    fontFamily: 'monospace',
+    marginTop: 1,
   },
   strategyTag: {
     fontSize: 11,
@@ -140,6 +166,9 @@ const styles = StyleSheet.create({
   badgeShort: {
     backgroundColor: COLORS.lossLight,
   },
+  badgeExited: {
+    backgroundColor: 'rgba(100, 116, 139, 0.2)',
+  },
   qtyText: {
     fontSize: 11,
     fontWeight: '800',
@@ -149,6 +178,9 @@ const styles = StyleSheet.create({
   },
   textShort: {
     color: COLORS.loss,
+  },
+  textExited: {
+    color: COLORS.textMuted,
   },
   pnlRow: {
     flexDirection: 'row',
@@ -206,5 +238,19 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: '700',
     color: COLORS.text,
+  },
+  closedBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: 'rgba(100, 116, 139, 0.15)',
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 8,
+  },
+  closedText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: COLORS.textMuted,
   },
 });
