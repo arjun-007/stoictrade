@@ -19,9 +19,9 @@ namespace StoicTrade.Api.Services.Strategies
 
         /// <summary>
         /// Selects the optimal option contract based on underlying bias (BULLISH/BEARISH).
-        /// Supports target expiry index (e.g. 0 = current week, 1 = 2nd expiry week) and ITM distance (e.g. 1 = 1 strike ITM).
+        /// Supports target expiry index (e.g. 0 = current week, 1 = next week, 2 = 2 weeks after current week expiry) and ITM distance (e.g. 1 = 1 strike ITM).
         /// </summary>
-        public string? GetOptimalContract(string underlyingSymbol, string bias, int itmDistance = 1, int expiryIndex = 1)
+        public string? GetOptimalContract(string underlyingSymbol, string bias, int itmDistance = 1, int expiryIndex = 2)
         {
             var rawJson = _cache.GetOptionChainData(underlyingSymbol);
             var spotData = _cache.GetSpotData(underlyingSymbol);
@@ -51,19 +51,20 @@ namespace StoicTrade.Api.Services.Strategies
                         ? atmStrike - (itmDistance * 50) 
                         : atmStrike + (itmDistance * 50);
 
-                    // Collect all distinct expiries
+                    // Collect all distinct expiries and sort strictly chronologically
                     var distinctExpiries = dataArray.EnumerateArray()
                         .Select(x => x.TryGetProperty("expiryDate", out var e) ? e.GetString() : null)
                         .Where(x => !string.IsNullOrEmpty(x))
                         .Distinct()
+                        .OrderBy(e => ParseExpiryToDate(e) ?? DateTime.MaxValue)
                         .ToList();
 
                     if (!distinctExpiries.Any()) return null;
 
-                    // Select the requested expiry (e.g. expiryIndex = 1 for 2nd expiry / next week)
+                    // Select the requested expiry (e.g. expiryIndex = 2 for 2 weeks after current week expiry)
                     string chosenExpiry = (expiryIndex >= 0 && expiryIndex < distinctExpiries.Count)
-                        ? (distinctExpiries[expiryIndex] ?? distinctExpiries.First() ?? "")
-                        : (distinctExpiries.First() ?? "");
+                        ? (distinctExpiries[expiryIndex] ?? distinctExpiries.Last() ?? "")
+                        : (distinctExpiries.Count > 1 ? (distinctExpiries.ElementAtOrDefault(1) ?? distinctExpiries.First() ?? "") : (distinctExpiries.First() ?? ""));
 
                     return $"NSE:{underlyingSymbol}{chosenExpiry}{targetStrike}{optionType}";
                 }
@@ -72,6 +73,58 @@ namespace StoicTrade.Api.Services.Strategies
             {
                 _logger.LogError(ex, "Error selecting optimal option contract");
             }
+
+            return null;
+        }
+
+        public static DateTime? ParseExpiryToDate(string? expiry)
+        {
+            if (string.IsNullOrWhiteSpace(expiry)) return null;
+            string s = expiry.Trim().ToUpper();
+
+            // 1. Weekly format: 5 chars: yy(2) + m(1) + dd(2), e.g. "26915", "26O08", "26N12", "26D24"
+            if (s.Length == 5 && char.IsDigit(s[0]) && char.IsDigit(s[1]) && char.IsDigit(s[3]) && char.IsDigit(s[4]))
+            {
+                if (int.TryParse(s.Substring(0, 2), out int yy))
+                {
+                    char mChar = s[2];
+                    int month = mChar switch
+                    {
+                        'O' => 10,
+                        'N' => 11,
+                        'D' => 12,
+                        _ => char.IsDigit(mChar) ? (mChar - '0') : 0
+                    };
+                    if (int.TryParse(s.Substring(3, 2), out int day) && month >= 1 && month <= 12 && day >= 1 && day <= 31)
+                    {
+                        try { return new DateTime(2000 + yy, month, day); } catch {}
+                    }
+                }
+            }
+
+            // 2. Monthly format: 5 chars: yy(2) + mon(3 letters), e.g. "26SEP", "26OCT", "26NOV"
+            if (s.Length == 5 && char.IsDigit(s[0]) && char.IsDigit(s[1]))
+            {
+                if (int.TryParse(s.Substring(0, 2), out int yy))
+                {
+                    string mon = s.Substring(2, 3);
+                    string[] months = { "JAN", "FEB", "MAR", "APR", "MAY", "JUN", "JUL", "AUG", "SEP", "OCT", "NOV", "DEC" };
+                    int monthIdx = Array.IndexOf(months, mon);
+                    if (monthIdx >= 0)
+                    {
+                        int month = monthIdx + 1;
+                        int year = 2000 + yy;
+                        // Return the last Thursday of that month
+                        int daysInMonth = DateTime.DaysInMonth(year, month);
+                        var lastDay = new DateTime(year, month, daysInMonth);
+                        int daysBack = ((int)lastDay.DayOfWeek - (int)DayOfWeek.Thursday + 7) % 7;
+                        return lastDay.AddDays(-daysBack);
+                    }
+                }
+            }
+
+            // 3. Fallback to standard DateTime parser if standard ISO format
+            if (DateTime.TryParse(s, out var dt)) return dt;
 
             return null;
         }

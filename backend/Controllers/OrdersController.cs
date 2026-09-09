@@ -50,9 +50,10 @@ namespace StoicTrade.Api.Controllers
                 
                 dbContext.TradeLogs.Add(trade);
                 
-                // Match by normalized symbol or exact symbol
+                // Match by normalized symbol or exact symbol (prioritize open positions)
                 var allPositions = await Microsoft.EntityFrameworkCore.EntityFrameworkQueryableExtensions.ToListAsync(dbContext.PaperPositions);
-                var position = allPositions.FirstOrDefault(p => NormaliseSymbol(p.Symbol) == normalisedInstrument);
+                var position = allPositions.FirstOrDefault(p => NormaliseSymbol(p.Symbol) == normalisedInstrument && p.NetQty > 0)
+                    ?? allPositions.FirstOrDefault(p => NormaliseSymbol(p.Symbol) == normalisedInstrument);
                 
                 if (position == null)
                 {

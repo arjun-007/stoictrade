@@ -110,23 +110,21 @@ namespace StoicTrade.Api.Controllers
                 try { _dbContext.SaveChanges(); } catch {}
             }
 
-            var paperPositions = _dbContext.PaperPositions.ToList();
+            var paperPositions = _dbContext.PaperPositions
+                .Where(p => !string.IsNullOrWhiteSpace(p.Symbol) && p.Symbol != "NIFTY")
+                .OrderByDescending(p => p.CreatedAt)
+                .ToList();
+
             var netPositions = new List<object>();
             decimal totalPnL = 0;
             int activePositionsCount = 0;
 
-            var grouped = paperPositions
-                .Where(p => !string.IsNullOrWhiteSpace(p.Symbol) && p.Symbol != "NIFTY")
-                .GroupBy(p => $"{NormaliseOptionSymbol(p.Symbol)}|{p.StrategyName ?? "Strategy"}");
-
-            foreach (var group in grouped)
+            foreach (var pos in paperPositions)
             {
-                var firstPos = group.First();
-                string canonicalSymbol = NormaliseOptionSymbol(firstPos.Symbol);
-                string strategyName = firstPos.StrategyName ?? "Strategy";
-                int netQty = group.Sum(p => p.NetQty);
-                decimal realizedProfit = group.Sum(p => p.RealizedProfit ?? 0m);
-                var lastUpdatedIst = ToIst(group.Max(p => p.UpdatedAt)).Date;
+                string canonicalSymbol = NormaliseOptionSymbol(pos.Symbol);
+                string strategyName = pos.StrategyName ?? "Strategy";
+                int netQty = pos.NetQty;
+                var lastUpdatedIst = ToIst(pos.UpdatedAt).Date;
 
                 // Only include:
                 // a) Open / Carry-forward positions (netQty != 0)
@@ -138,15 +136,16 @@ namespace StoicTrade.Api.Controllers
 
                 // Priority: individual option price cache → spot data → last trade avg
                 decimal? cachedLtp = _marketDataCache.GetOptionPrice(canonicalSymbol);
-                
-                decimal buyAvg = group.FirstOrDefault(p => (p.BuyAvg ?? 0m) > 0 && (p.BuyAvg ?? 0m) < 5000)?.BuyAvg 
-                    ?? group.FirstOrDefault(p => (p.BuyAvg ?? 0m) > 0)?.BuyAvg 
-                    ?? 0m;
-                    
-                decimal sellAvg = group.FirstOrDefault(p => (p.SellAvg ?? 0m) > 0 && (p.SellAvg ?? 0m) < 5000)?.SellAvg 
-                    ?? (cachedLtp.HasValue ? cachedLtp.Value : 0m);
 
-                // If sellAvg was stored as spot price (> 5000), fix it using option LTP
+                decimal buyAvg = (pos.BuyAvg ?? 0m) > 0 && (pos.BuyAvg ?? 0m) < 5000 
+                    ? pos.BuyAvg.Value 
+                    : ((pos.BuyAvg ?? 0m) > 0 ? (cachedLtp ?? pos.BuyAvg.Value) : 0m);
+
+                decimal sellAvg = (pos.SellAvg ?? 0m) > 0 && (pos.SellAvg ?? 0m) < 5000 
+                    ? pos.SellAvg.Value 
+                    : (cachedLtp ?? 0m);
+
+                // If sellAvg or buyAvg was stored as spot price (> 5000), fix it using option LTP
                 if (sellAvg > 5000 && cachedLtp.HasValue)
                 {
                     sellAvg = cachedLtp.Value;
@@ -160,20 +159,40 @@ namespace StoicTrade.Api.Controllers
                     ?? _marketDataCache.GetSpotData(canonicalSymbol)?.Price
                     ?? (netQty > 0 ? buyAvg : (sellAvg > 0 ? sellAvg : buyAvg));
 
-                decimal unrealized = 0;
+                int tradeQty = pos.TotalBuyQty > 0 
+                    ? pos.TotalBuyQty 
+                    : (pos.TotalSellQty > 0 ? pos.TotalSellQty : Math.Abs(netQty));
+
+                decimal realizedProfit = pos.RealizedProfit ?? 0m;
+                // Fallback: If position is closed with 0 realized profit recorded, calculate from sellAvg - buyAvg
+                if (netQty == 0 && realizedProfit == 0m && buyAvg > 0 && sellAvg > 0 && tradeQty > 0)
+                {
+                    realizedProfit = (sellAvg - buyAvg) * tradeQty;
+                }
+
+                decimal unrealized = 0m;
                 if (netQty > 0) unrealized = (ltp - buyAvg) * netQty;
                 else if (netQty < 0) unrealized = (sellAvg - ltp) * Math.Abs(netQty);
 
-                decimal targetPrice = group.FirstOrDefault(p => p.TargetPrice.HasValue && p.TargetPrice > 0)?.TargetPrice 
-                    ?? (buyAvg > 0 ? Math.Round(buyAvg * 1.25m, 2) : 0m);
-                decimal stopLossPrice = group.FirstOrDefault(p => p.StopLossPrice.HasValue && p.StopLossPrice > 0)?.StopLossPrice 
-                    ?? (buyAvg > 0 ? Math.Round(Math.Max(5.0m, buyAvg * 0.85m), 2) : 0m);
-                decimal trailingStopLossPoint = group.FirstOrDefault(p => p.TrailingStopLossPoint.HasValue && p.TrailingStopLossPoint > 0)?.TrailingStopLossPoint ?? 8.0m;
-                decimal peakLtp = group.Max(p => p.PeakLtp ?? 0m);
+                decimal targetPrice = pos.TargetPrice.HasValue && pos.TargetPrice > 0 
+                    ? pos.TargetPrice.Value 
+                    : (buyAvg > 0 ? Math.Round(buyAvg * 1.25m, 2) : 0m);
+
+                decimal stopLossPrice = pos.StopLossPrice.HasValue && pos.StopLossPrice > 0 
+                    ? pos.StopLossPrice.Value 
+                    : (buyAvg > 0 ? Math.Round(Math.Max(5.0m, buyAvg * 0.85m), 2) : 0m);
+
+                decimal trailingStopLossPoint = pos.TrailingStopLossPoint.HasValue && pos.TrailingStopLossPoint > 0 
+                    ? pos.TrailingStopLossPoint.Value 
+                    : 8.0m;
+
+                decimal peakLtp = pos.PeakLtp ?? 0m;
 
                 netPositions.Add(new {
                     symbol = canonicalSymbol,
                     netQty = netQty,
+                    qty = tradeQty,
+                    tradeQty = tradeQty,
                     buyAvg = buyAvg,
                     sellAvg = sellAvg,
                     ltp = ltp,
@@ -183,11 +202,15 @@ namespace StoicTrade.Api.Controllers
                     peakLtp = peakLtp,
                     strategyName = strategyName,
                     realized_profit = realizedProfit,
+                    realizedProfit = realizedProfit,
                     unrealized_profit = unrealized,
+                    unrealizedProfit = unrealized,
                     pl = realizedProfit + unrealized,
                     slNo = 1,
-                    id = firstPos.Id,
-                    isCarryForward = netQty != 0 && ToIst(group.Min(p => p.CreatedAt)).Date < todayIst
+                    id = pos.Id,
+                    createdAt = pos.CreatedAt,
+                    updatedAt = pos.UpdatedAt,
+                    isCarryForward = netQty != 0 && ToIst(pos.CreatedAt).Date < todayIst
                 });
 
                 totalPnL += (realizedProfit + unrealized);

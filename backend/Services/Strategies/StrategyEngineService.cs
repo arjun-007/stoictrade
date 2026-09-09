@@ -449,7 +449,7 @@ namespace StoicTrade.Api.Services.Strategies
                     var riskEngine = scope.ServiceProvider.GetRequiredService<StoicTrade.Api.Services.RiskEngine>();
                     foreach (var signal in aggregatedSignals)
                     {
-                        if (globalSettings != null)
+                        if (globalSettings != null && signal.Action != "EXIT")
                         {
                             // Multiply the base quantity by AutoTradeLots (default 1)
                             signal.Quantity = globalSettings.BaseLotSize * Math.Max(1, globalSettings.AutoTradeLots);

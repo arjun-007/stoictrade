@@ -43,25 +43,42 @@ namespace StoicTrade.Api.Services
                 // 1. Intercept EXIT action to cleanly close existing position
                 if (signal.Action == "EXIT")
                 {
-                    var openPosition = dbContext.PaperPositions.FirstOrDefault(p => 
-                        p.NetQty > 0 && 
-                        ((!string.IsNullOrEmpty(signal.StrategyName) && p.StrategyName == signal.StrategyName) ||
-                         (!string.IsNullOrEmpty(signal.Instrument) && signal.Instrument != "NIFTY" && NormaliseSymbol(p.Symbol) == NormaliseSymbol(signal.Instrument)))
-                    );
+                    PaperPosition? openPosition = null;
+                    if (!string.IsNullOrEmpty(signal.StrategyName))
+                    {
+                        openPosition = dbContext.PaperPositions.FirstOrDefault(p => 
+                            p.NetQty > 0 && 
+                            p.StrategyName == signal.StrategyName &&
+                            (string.IsNullOrEmpty(signal.Instrument) || signal.Instrument == "NIFTY" || NormaliseSymbol(p.Symbol) == NormaliseSymbol(signal.Instrument))
+                        );
+                    }
+
+                    if (openPosition == null && !string.IsNullOrEmpty(signal.Instrument) && signal.Instrument != "NIFTY")
+                    {
+                        openPosition = dbContext.PaperPositions.FirstOrDefault(p => 
+                            p.NetQty > 0 && 
+                            NormaliseSymbol(p.Symbol) == NormaliseSymbol(signal.Instrument)
+                        );
+                    }
 
                     if (openPosition != null)
                     {
                         decimal? exitLtp = optionEngine.ResolveOptionLtp(openPosition.Symbol);
                         decimal exitPrice = (exitLtp.HasValue && exitLtp.Value > 0)
                             ? exitLtp.Value
-                            : ((openPosition.BuyAvg ?? 0m) > 0 ? (openPosition.BuyAvg ?? 0m) : 150m);
+                            : (signal.ExpectedPrice > 0 && signal.ExpectedPrice < 5000 
+                                ? signal.ExpectedPrice 
+                                : (signal.Price > 0 && signal.Price < 5000 
+                                    ? signal.Price 
+                                    : ((openPosition.BuyAvg ?? 0m) > 0 ? (openPosition.BuyAvg ?? 0m) : 150m)));
 
                         int exitQty = openPosition.NetQty;
                         openPosition.TotalSellQty += exitQty;
                         openPosition.TotalSellValue = (openPosition.TotalSellValue ?? 0m) + (exitQty * exitPrice);
                         openPosition.SellAvg = openPosition.TotalSellQty > 0 ? (openPosition.TotalSellValue ?? 0m) / openPosition.TotalSellQty : exitPrice;
                         openPosition.NetQty = 0;
-                        openPosition.RealizedProfit = (openPosition.RealizedProfit ?? 0m) + ((openPosition.TotalSellValue ?? 0m) - (openPosition.TotalBuyValue ?? 0m));
+                        decimal tradePnl = (exitPrice - (openPosition.BuyAvg ?? 0m)) * exitQty;
+                        openPosition.RealizedProfit = (openPosition.RealizedProfit ?? 0m) + tradePnl;
                         openPosition.UpdatedAt = System.DateTime.UtcNow;
 
                         dbContext.TradeLogs.Add(new TradeLog
@@ -281,7 +298,8 @@ namespace StoicTrade.Api.Services
                     pos.TotalSellValue = (pos.TotalSellValue ?? 0m) + (exitQty * currentLtp);
                     pos.SellAvg = pos.TotalSellQty > 0 ? (pos.TotalSellValue ?? 0m) / pos.TotalSellQty : currentLtp;
                     pos.NetQty = 0;
-                    pos.RealizedProfit = (pos.RealizedProfit ?? 0m) + ((pos.TotalSellValue ?? 0m) - (pos.TotalBuyValue ?? 0m));
+                    decimal tradePnl = (currentLtp - (pos.BuyAvg ?? 0m)) * exitQty;
+                    pos.RealizedProfit = (pos.RealizedProfit ?? 0m) + tradePnl;
                     pos.UpdatedAt = System.DateTime.UtcNow;
                     hasChanges = true;
 

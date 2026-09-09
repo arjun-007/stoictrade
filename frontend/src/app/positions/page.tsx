@@ -9,9 +9,10 @@ type PositionType = "LONG" | "SHORT";
 type PositionCategory = "DAY" | "HOLDING";
 
 interface Position {
-  id: number;
+  id: number | string;
   symbol: string;
   qty: number;
+  tradeQty?: number;
   buyPrice: number;
   sellPrice?: number;
   targetPrice?: number;
@@ -129,7 +130,8 @@ export default function PositionsPage() {
         }
         if (data.netPositions) {
           data.netPositions.forEach((p: any) => {
-            const qty = Math.abs(p.netQty ?? 0);
+            const netQty = p.netQty ?? 0;
+            const tradeQty = p.tradeQty ?? p.qty ?? Math.abs(netQty);
             // Normalise symbol: collapse old "NIFTYNIFTY…" entries stored in DB
             const rawSymbol: string = p.symbol ?? "-";
             const symbol = rawSymbol.startsWith("NIFTYNIFTY") ? rawSymbol.substring(5) : rawSymbol;
@@ -138,9 +140,10 @@ export default function PositionsPage() {
             const sl = p.stopLossPrice && p.stopLossPrice > 0 ? p.stopLossPrice : (buyAvg > 0 ? Math.max(5, buyAvg * 0.85) : undefined);
 
             mapped.push({
-              id: mapped.length + 1,
+              id: p.id ?? (mapped.length + 1),
               symbol,
-              qty: qty,
+              qty: Math.abs(netQty),
+              tradeQty: tradeQty,
               buyPrice: buyAvg,
               sellPrice: p.sellAvg ?? 0,
               targetPrice: tgt,
@@ -150,8 +153,8 @@ export default function PositionsPage() {
               strategyName: p.strategyName ?? "Strategy",
               // ltp comes from the backend option price cache; fall back to avg only if null
               ltp: p.ltp ?? p.buyAvg ?? 0,
-              type: (p.netQty ?? 0) >= 0 ? "LONG" : "SHORT",
-              status: qty === 0 ? "EXITED" : "ACTIVE",
+              type: netQty >= 0 ? "LONG" : "SHORT",
+              status: netQty === 0 ? "EXITED" : "ACTIVE",
               category: p.isCarryForward ? "HOLDING" : "DAY",
               realizedProfit: p.realized_profit ?? p.realizedProfit ?? 0
             });
@@ -201,7 +204,7 @@ export default function PositionsPage() {
     if (pos.status === "EXITED") {
       const pnl = pos.realizedProfit !== undefined && pos.realizedProfit !== 0
         ? pos.realizedProfit
-        : (pos.sellPrice && pos.buyPrice ? (pos.sellPrice - pos.buyPrice) * 65 : 0);
+        : (pos.sellPrice && pos.buyPrice ? (pos.sellPrice - pos.buyPrice) * (pos.tradeQty || pos.qty || 65) : 0);
       return acc + pnl;
     }
     const entryPrice = pos.type === "LONG" ? pos.buyPrice : (pos.sellPrice ?? 0);
@@ -298,22 +301,40 @@ export default function PositionsPage() {
       </div>
 
       {/* Filters */}
-      <div className="flex flex-wrap items-center gap-4 p-4 bg-surface rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm">
-        <div className="flex items-center gap-2 text-slate-500 mr-2">
-          <Filter className="w-4 h-4" />
-          <span className="text-sm font-semibold uppercase tracking-wider">Filters:</span>
-        </div>
-        
-        <div className="flex bg-slate-100 dark:bg-slate-800 p-1 rounded-lg">
-          <button onClick={() => setFilterStatus("ALL")} className={`px-4 py-1.5 text-sm font-bold rounded-md transition-all ${filterStatus === "ALL" ? "bg-white dark:bg-slate-700 shadow-sm text-slate-900 dark:text-white" : "text-slate-500"}`}>All</button>
-          <button onClick={() => setFilterStatus("ACTIVE")} className={`px-4 py-1.5 text-sm font-bold rounded-md transition-all ${filterStatus === "ACTIVE" ? "bg-white dark:bg-slate-700 shadow-sm text-slate-900 dark:text-white" : "text-slate-500"}`}>Active</button>
-          <button onClick={() => setFilterStatus("EXITED")} className={`px-4 py-1.5 text-sm font-bold rounded-md transition-all ${filterStatus === "EXITED" ? "bg-white dark:bg-slate-700 shadow-sm text-slate-900 dark:text-white" : "text-slate-500"}`}>Exited</button>
+      <div className="flex flex-col sm:flex-row items-center justify-between gap-4 p-4 bg-surface border border-slate-200 dark:border-slate-800 rounded-2xl">
+        <div className="flex items-center gap-2 overflow-x-auto w-full sm:w-auto pb-2 sm:pb-0">
+          <Filter className="w-4 h-4 text-slate-400 mr-2 shrink-0" />
+          <span className="text-xs font-semibold text-slate-400 uppercase mr-2 tracking-wider shrink-0">Status:</span>
+          {(["ALL", "ACTIVE", "EXITED"] as const).map((st) => (
+            <button
+              key={st}
+              onClick={() => setFilterStatus(st)}
+              className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all shrink-0 ${
+                filterStatus === st 
+                  ? "bg-slate-900 text-white dark:bg-white dark:text-slate-900 shadow-sm" 
+                  : "bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 hover:bg-slate-200 dark:hover:bg-slate-700"
+              }`}
+            >
+              {st === "ALL" ? "All" : st === "ACTIVE" ? "Active" : "Exited"}
+            </button>
+          ))}
         </div>
 
-        <div className="flex bg-slate-100 dark:bg-slate-800 p-1 rounded-lg">
-          <button onClick={() => setFilterType("ALL")} className={`px-4 py-1.5 text-sm font-bold rounded-md transition-all ${filterType === "ALL" ? "bg-white dark:bg-slate-700 shadow-sm text-slate-900 dark:text-white" : "text-slate-500"}`}>All Types</button>
-          <button onClick={() => setFilterType("LONG")} className={`px-4 py-1.5 text-sm font-bold rounded-md transition-all ${filterType === "LONG" ? "bg-white dark:bg-slate-700 shadow-sm text-slate-900 dark:text-white" : "text-slate-500"}`}>Long</button>
-          <button onClick={() => setFilterType("SHORT")} className={`px-4 py-1.5 text-sm font-bold rounded-md transition-all ${filterType === "SHORT" ? "bg-white dark:bg-slate-700 shadow-sm text-slate-900 dark:text-white" : "text-slate-500"}`}>Short</button>
+        <div className="flex items-center gap-2 overflow-x-auto w-full sm:w-auto">
+          <span className="text-xs font-semibold text-slate-400 uppercase mr-2 tracking-wider shrink-0">Type:</span>
+          {(["ALL", "LONG", "SHORT"] as const).map((t) => (
+            <button
+              key={t}
+              onClick={() => setFilterType(t)}
+              className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all shrink-0 ${
+                filterType === t 
+                  ? "bg-slate-900 text-white dark:bg-white dark:text-slate-900 shadow-sm" 
+                  : "bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 hover:bg-slate-200 dark:hover:bg-slate-700"
+              }`}
+            >
+              {t === "ALL" ? "All Types" : t === "LONG" ? "Long" : "Short"}
+            </button>
+          ))}
         </div>
       </div>
 
@@ -327,8 +348,9 @@ export default function PositionsPage() {
                 <th className="p-4">Status</th>
                 <th className="p-4 text-right">Qty</th>
                 <th className="p-4 text-right">Avg. Entry</th>
+                <th className="p-4 text-right">Exit Price</th>
                 <th className="p-4 text-right">Target</th>
-                <th className="p-4 text-right">Exit / SL</th>
+                <th className="p-4 text-right">Stop Loss</th>
                 <th className="p-4 text-right">LTP</th>
                 <th className="p-4 text-right">P&L</th>
                 <th className="p-4 text-center">Action</th>
@@ -337,18 +359,19 @@ export default function PositionsPage() {
             <tbody className="divide-y divide-slate-100 dark:divide-slate-800/50">
               {filteredData.length === 0 ? (
                 <tr>
-                  <td colSpan={10} className="p-8 text-center text-slate-500">
+                  <td colSpan={11} className="p-8 text-center text-slate-500">
                     No positions found matching your filters.
                   </td>
                 </tr>
               ) : (
                 filteredData.map((pos) => {
                   const entryPrice = pos.type === "LONG" ? pos.buyPrice : (pos.sellPrice ?? 0);
+                  const exitPrice = pos.sellPrice ?? 0;
                   const currentPrice = pos.status === "EXITED" && pos.sellPrice ? pos.sellPrice : pos.ltp;
                   const pnl = pos.status === "EXITED"
                     ? (pos.realizedProfit !== undefined && pos.realizedProfit !== 0
                         ? pos.realizedProfit
-                        : (pos.sellPrice && pos.buyPrice ? (pos.sellPrice - pos.buyPrice) * 65 : 0))
+                        : (exitPrice && pos.buyPrice ? (exitPrice - pos.buyPrice) * (pos.tradeQty || pos.qty || 65) : 0))
                     : (pos.type === "LONG"
                       ? (currentPrice - entryPrice) * pos.qty
                       : (entryPrice - currentPrice) * pos.qty);
@@ -385,8 +408,22 @@ export default function PositionsPage() {
                           {pos.status}
                         </span>
                       </td>
-                      <td className="p-4 text-right font-medium">{pos.qty}</td>
+                      <td className="p-4 text-right font-medium">
+                        {pos.status === "ACTIVE" ? (
+                          <span>{pos.qty}</span>
+                        ) : (
+                          <div>
+                            <span className="text-slate-700 dark:text-slate-300">0</span>
+                            {pos.tradeQty && pos.tradeQty > 0 ? (
+                              <div className="text-[10px] text-slate-400 font-normal">Traded: {pos.tradeQty}</div>
+                            ) : null}
+                          </div>
+                        )}
+                      </td>
                       <td className="p-4 text-right text-slate-600 dark:text-slate-400 font-semibold">₹{entryPrice.toFixed(2)}</td>
+                      <td className="p-4 text-right font-semibold text-slate-700 dark:text-slate-300">
+                        {pos.status === "EXITED" && exitPrice > 0 ? `₹${exitPrice.toFixed(2)}` : "—"}
+                      </td>
                       <td className="p-4 text-right font-semibold text-emerald-600 dark:text-emerald-400">
                         {pos.targetPrice ? `₹${pos.targetPrice.toFixed(2)}` : "—"}
                       </td>
@@ -419,7 +456,6 @@ export default function PositionsPage() {
                                 });
                                 if (res.ok) {
                                   alert("Order placed successfully");
-                                  // The periodic poll (every 5s) will refresh the grid shortly.
                                 } else {
                                   alert("Failed to exit position");
                                 }
