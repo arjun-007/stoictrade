@@ -51,12 +51,19 @@ namespace StoicTrade.Api.Services.Strategies
                         ? atmStrike - (itmDistance * 50) 
                         : atmStrike + (itmDistance * 50);
 
-                    // Collect all distinct expiries and sort strictly chronologically
+                    // Current IST date to filter out any past expired contracts
+                    var ist = TimeZoneHelper.GetIstTimeZone();
+                    DateTime today = TimeZoneInfo.ConvertTimeFromUtc(DateTime.UtcNow, ist).Date;
+
+                    // Collect all distinct expiries, filter out expired dates, group by parsed date, and sort strictly chronologically
                     var distinctExpiries = dataArray.EnumerateArray()
                         .Select(x => x.TryGetProperty("expiryDate", out var e) ? e.GetString() : null)
                         .Where(x => !string.IsNullOrEmpty(x))
                         .Distinct()
-                        .OrderBy(e => ParseExpiryToDate(e) ?? DateTime.MaxValue)
+                        .GroupBy(e => ParseExpiryToDate(e))
+                        .Where(g => g.Key.HasValue && g.Key.Value.Date >= today)
+                        .OrderBy(g => g.Key!.Value)
+                        .Select(g => g.OrderByDescending(x => x!.Length == 5 && char.IsLetter(x[2])).First()!)
                         .ToList();
 
                     if (!distinctExpiries.Any()) return null;
@@ -103,6 +110,7 @@ namespace StoicTrade.Api.Services.Strategies
             }
 
             // 2. Monthly format: 5 chars: yy(2) + mon(3 letters), e.g. "26SEP", "26OCT", "26NOV"
+            // In NSE NIFTY derivatives, monthly contracts expire on the last Tuesday of the month
             if (s.Length == 5 && char.IsDigit(s[0]) && char.IsDigit(s[1]))
             {
                 if (int.TryParse(s.Substring(0, 2), out int yy))
@@ -114,10 +122,10 @@ namespace StoicTrade.Api.Services.Strategies
                     {
                         int month = monthIdx + 1;
                         int year = 2000 + yy;
-                        // Return the last Thursday of that month
+                        // Return the last Tuesday of that month
                         int daysInMonth = DateTime.DaysInMonth(year, month);
                         var lastDay = new DateTime(year, month, daysInMonth);
-                        int daysBack = ((int)lastDay.DayOfWeek - (int)DayOfWeek.Thursday + 7) % 7;
+                        int daysBack = ((int)lastDay.DayOfWeek - (int)DayOfWeek.Tuesday + 7) % 7;
                         return lastDay.AddDays(-daysBack);
                     }
                 }

@@ -512,35 +512,37 @@ namespace StoicTrade.Api.Services.MarketData
             var ist = TimeZoneHelper.GetIstTimeZone();
             DateTime today = TimeZoneInfo.ConvertTimeFromUtc(DateTime.UtcNow, ist).Date;
 
-            // ── 1. Weekly expiries for Thursdays (next 4 Thursdays) ─────────────
-            int daysUntilThursday = ((int)DayOfWeek.Thursday - (int)today.DayOfWeek + 7) % 7;
+            // ── 1. Weekly expiries for Tuesdays (next 4 Tuesdays) ─────────────
+            int daysUntilTuesday = ((int)DayOfWeek.Tuesday - (int)today.DayOfWeek + 7) % 7;
             for (int i = 0; i < 4; i++)
             {
-                DateTime thurs = today.AddDays(daysUntilThursday + (i * 7));
-                DateTime lastThurs = GetLastThursdayOfMonth(thurs);
+                DateTime tues = today.AddDays(daysUntilTuesday + (i * 7));
+                DateTime lastTues = GetLastTuesdayOfMonth(tues);
 
-                // If this Thursday is the last Thursday of the month, NSE issues a monthly contract
-                // instead of a weekly contract. Use the monthly format (YYMMM) so Fyers doesn't reject it.
-                if (thurs.Date == lastThurs.Date)
+                int month = tues.Month;
+                string monthChar = month <= 9 ? month.ToString()
+                    : month == 10 ? "O" : month == 11 ? "N" : "D";
+
+                // If this Tuesday is the last Tuesday of the month, NSE issues a monthly contract
+                // (e.g. "26SEP"). We add both monthly format and numerical weekly format so Fyers quotes match.
+                if (tues.Date == lastTues.Date)
                 {
-                    expiries.Add(thurs.ToString("yyMMM").ToUpper());
+                    expiries.Add(tues.ToString("yyMMM").ToUpper());
+                    expiries.Add($"{tues:yy}{monthChar}{tues:dd}");
                 }
                 else
                 {
-                    int month = thurs.Month;
-                    string monthChar = month <= 9 ? month.ToString()
-                        : month == 10 ? "O" : month == 11 ? "N" : "D";
-                    expiries.Add($"{thurs:yy}{monthChar}{thurs:dd}");
+                    expiries.Add($"{tues:yy}{monthChar}{tues:dd}");
                 }
             }
 
-            // ── 2. Monthly expiries: last Thursday of current + next 5 months ──
+            // ── 2. Monthly expiries: last Tuesday of current + next 5 months ──
             for (int m = 0; m < 6; m++)
             {
                 var monthStart = new DateTime(today.Year, today.Month, 1).AddMonths(m);
-                DateTime lastThurs = GetLastThursdayOfMonth(monthStart);
+                DateTime lastTues = GetLastTuesdayOfMonth(monthStart);
 
-                string monthlyFmt = lastThurs.ToString("yyMMM").ToUpper();
+                string monthlyFmt = lastTues.ToString("yyMMM").ToUpper();
                 expiries.Add(monthlyFmt);
             }
 
@@ -548,15 +550,6 @@ namespace StoicTrade.Api.Services.MarketData
                 .Distinct()
                 .OrderBy(e => OptionSelectionEngine.ParseExpiryToDate(e) ?? DateTime.MaxValue)
                 .ToList();
-        }
-
-        /// <summary>Returns the last Thursday of the month containing <paramref name="anyDayInMonth"/>.</summary>
-        private static DateTime GetLastThursdayOfMonth(DateTime anyDayInMonth)
-        {
-            var lastDay = new DateTime(anyDayInMonth.Year, anyDayInMonth.Month,
-                DateTime.DaysInMonth(anyDayInMonth.Year, anyDayInMonth.Month));
-            int daysBack = ((int)lastDay.DayOfWeek - (int)DayOfWeek.Thursday + 7) % 7;
-            return lastDay.AddDays(-daysBack);
         }
 
         /// <summary>Returns the last Tuesday of the month containing <paramref name="anyDayInMonth"/>.</summary>

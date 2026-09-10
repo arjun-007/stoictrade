@@ -1,10 +1,10 @@
 const MONTH_NAMES = ["JAN", "FEB", "MAR", "APR", "MAY", "JUN", "JUL", "AUG", "SEP", "OCT", "NOV", "DEC"];
 
-function getLastThursdayOfMonth(year: number, month: number): number {
+function getLastTuesdayOfMonth(year: number, month: number): number {
   const lastDay = new Date(year, month, 0).getDate();
   const date = new Date(year, month - 1, lastDay);
   const dayOfWeek = date.getDay();
-  const diff = (dayOfWeek - 4 + 7) % 7;
+  const diff = (dayOfWeek - 2 + 7) % 7;
   return lastDay - diff;
 }
 
@@ -28,8 +28,8 @@ export function formatInstrumentName(symbol: string): string {
     const [, yy, mon, strike] = monthlyMatch;
     const monthIdx = MONTH_NAMES.indexOf(mon.toUpperCase());
     const fullYear = 2000 + parseInt(yy, 10);
-    const lastThurs = monthIdx >= 0 ? getLastThursdayOfMonth(fullYear, monthIdx + 1) : 0;
-    const dayStr = lastThurs > 0 ? `${String(lastThurs).padStart(2, "0")} ` : "";
+    const lastTues = monthIdx >= 0 ? getLastTuesdayOfMonth(fullYear, monthIdx + 1) : 0;
+    const dayStr = lastTues > 0 ? `${String(lastTues).padStart(2, "0")} ` : "";
     return `NIFTY ${dayStr}${mon.toUpperCase()} ${yy} ${strike} ${type}`;
   }
 

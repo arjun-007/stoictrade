@@ -39,11 +39,11 @@ const MONTH_NAMES = ["JAN","FEB","MAR","APR","MAY","JUN","JUL","AUG","SEP","OCT"
  *   weekly format: yy + monthChar + dd  e.g. "2682521" → yy=26, month=8(AUG), dd=21
  *   monthly format: yyMMM.toUpper()    e.g. "26AUG"
  */
-function getLastThursdayOfMonth(year: number, month: number): number {
+function getLastTuesdayOfMonth(year: number, month: number): number {
   const lastDay = new Date(year, month, 0).getDate();
   const date = new Date(year, month - 1, lastDay);
-  const dayOfWeek = date.getDay(); // 0 = Sun, 4 = Thu
-  const diff = (dayOfWeek - 4 + 7) % 7;
+  const dayOfWeek = date.getDay(); // 0 = Sun, 2 = Tue
+  const diff = (dayOfWeek - 2 + 7) % 7;
   return lastDay - diff;
 }
 
@@ -58,8 +58,8 @@ function parseExpiry(expiryStr: string): { day: string; month: string; year: str
     const mon = s.substring(2, 5);
     const monthIdx = MONTH_NAMES.indexOf(mon);
     const fullYear = 2000 + parseInt(yearShort, 10);
-    const lastThurs = monthIdx >= 0 ? getLastThursdayOfMonth(fullYear, monthIdx + 1) : 0;
-    const day = lastThurs > 0 ? String(lastThurs).padStart(2, "0") : "";
+    const lastTues = monthIdx >= 0 ? getLastTuesdayOfMonth(fullYear, monthIdx + 1) : 0;
+    const day = lastTues > 0 ? String(lastTues).padStart(2, "0") : "";
     return { day, month: mon, year: yearShort };
   }
   // Weekly format: 5 chars like "26821" (yy + monthChar + dd)

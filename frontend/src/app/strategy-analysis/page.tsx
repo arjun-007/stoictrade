@@ -7,6 +7,7 @@ import {
   Layers, Users, CheckSquare, Trash2, Calendar, LogOut
 } from "lucide-react";
 import { fetchWithAuth } from "@/lib/api";
+import { formatInstrumentName } from "@/app/positions/page";
 
 interface StrategyConfig {
   id: number;
@@ -618,7 +619,12 @@ export default function StrategyAnalysisPage() {
                             {item.signal.action}
                           </span>
                         </td>
-                        <td className="p-4 font-medium text-slate-700 dark:text-slate-300">{item.signal.instrument}</td>
+                        <td className="p-4 font-medium text-slate-700 dark:text-slate-300">
+                          <div className="font-semibold text-slate-900 dark:text-white">{formatInstrumentName(item.signal.instrument)}</div>
+                          {formatInstrumentName(item.signal.instrument) !== item.signal.instrument && (
+                            <div className="text-[10px] text-slate-400 font-mono">{item.signal.instrument}</div>
+                          )}
+                        </td>
                         <td className="p-4 text-right font-bold text-slate-900 dark:text-white">₹{item.signal.price.toFixed(2)}</td>
                         <td className="p-4 text-right font-semibold text-emerald-600 dark:text-emerald-400">
                           {tgt > 0 ? `₹${tgt.toFixed(2)}` : "—"}
@@ -816,7 +822,12 @@ export default function StrategyAnalysisPage() {
                               {entry.action}
                             </span>
                           </td>
-                          <td className="p-4 font-medium text-slate-700 dark:text-slate-300">{entry.instrument}</td>
+                          <td className="p-4 font-medium text-slate-700 dark:text-slate-300">
+                            <div className="font-semibold text-slate-900 dark:text-white">{formatInstrumentName(entry.instrument)}</div>
+                            {formatInstrumentName(entry.instrument) !== entry.instrument && (
+                              <div className="text-[10px] text-slate-400 font-mono">{entry.instrument}</div>
+                            )}
+                          </td>
                           <td className="p-4 text-right font-bold text-slate-900 dark:text-white">₹{entry.price.toFixed(2)}</td>
                           <td className="p-4 text-right font-semibold text-emerald-600 dark:text-emerald-400">
                             {tgt > 0 ? `₹${tgt.toFixed(2)}` : "—"}
