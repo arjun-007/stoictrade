@@ -25,46 +25,114 @@ namespace StoicTrade.Api.Services.Strategies
             // This prevents the bot from entering conflicting positions due to strategy overlaps.
             var aggregatedSignals = new List<Signal>();
 
-            var groupedByInstrument = signals.GroupBy(s => s.Instrument);
-
-            foreach (var group in groupedByInstrument)
+            // Always pass through EXIT signals first so positions can be squared off cleanly
+            var exitSignals = signals.Where(s => s.Action == "EXIT").ToList();
+            if (exitSignals.Any())
             {
-                var buySignals = group.Where(s => s.Action == "BUY" || s.Action == "BUY_PE").ToList();
-                var sellSignals = group.Where(s => s.Action == "SELL").ToList();
-                var exitSignals = group.Where(s => s.Action == "EXIT").ToList();
+                _logger.LogInformation("SignalAggregator: Passing {Count} EXIT signals.", exitSignals.Count);
+                aggregatedSignals.AddRange(exitSignals);
+            }
 
-                if (buySignals.Any() && sellSignals.Any())
-                {
-                    var buyNames = string.Join(", ", buySignals.Select(s => s.StrategyName));
-                    var sellNames = string.Join(", ", sellSignals.Select(s => s.StrategyName));
-                    _logger.LogWarning("SignalAggregator: Conflicting signals for {Instrument}. Rejecting both. BUY from: [{BuyStrategies}] vs SELL from: [{SellStrategies}]", 
-                        group.Key, buyNames, sellNames);
-                    continue;
-                }
+            // Group entry signals by underlying asset (NIFTY index vs Equity symbols)
+            var entrySignals = signals.Where(s => s.Action != "EXIT").ToList();
+            var groupedByAsset = entrySignals.GroupBy(s => GetUnderlyingAsset(s.Instrument));
 
-                // Pass through ALL exit signals as they are meant to close specific strategy positions
-                if (exitSignals.Any())
-                {
-                    _logger.LogInformation("SignalAggregator: Passing {Count} EXIT signals for {Instrument}", exitSignals.Count, group.Key);
-                    aggregatedSignals.AddRange(exitSignals);
-                }
+            foreach (var assetGroup in groupedByAsset)
+            {
+                string asset = assetGroup.Key;
 
-                // If multiple strategies say BUY, take the one with highest priority (lower number = higher priority)
-                if (buySignals.Any())
+                if (asset == "NIFTY")
                 {
-                    var bestBuy = buySignals.OrderBy(s => s.Priority).First();
-                    _logger.LogInformation("SignalAggregator: Selected BUY signal from {Strategy} due to priority {Priority}", bestBuy.StrategyName, bestBuy.Priority);
-                    aggregatedSignals.Add(bestBuy);
+                    // Classify CE (Bullish) vs PE (Bearish)
+                    var ceSignals = assetGroup.Where(s => IsCall(s)).ToList();
+                    var peSignals = assetGroup.Where(s => IsPut(s)).ToList();
+
+                    if (ceSignals.Any() && peSignals.Any())
+                    {
+                        var bestCe = ceSignals.OrderBy(s => s.Priority).First();
+                        var bestPe = peSignals.OrderBy(s => s.Priority).First();
+
+                        if (bestCe.Priority < bestPe.Priority)
+                        {
+                            _logger.LogInformation("SignalAggregator: NIFTY directional conflict resolved. CE from {CeStrategy} (Priority {CePri}) wins over PE from {PeStrategy} (Priority {PePri}).",
+                                bestCe.StrategyName, bestCe.Priority, bestPe.StrategyName, bestPe.Priority);
+                            aggregatedSignals.Add(bestCe);
+                        }
+                        else if (bestPe.Priority < bestCe.Priority)
+                        {
+                            _logger.LogInformation("SignalAggregator: NIFTY directional conflict resolved. PE from {PeStrategy} (Priority {PePri}) wins over CE from {CeStrategy} (Priority {CePri}).",
+                                bestPe.StrategyName, bestPe.Priority, bestCe.StrategyName, bestCe.Priority);
+                            aggregatedSignals.Add(bestPe);
+                        }
+                        else
+                        {
+                            var ceNames = string.Join(", ", ceSignals.Select(s => s.StrategyName));
+                            var peNames = string.Join(", ", peSignals.Select(s => s.StrategyName));
+                            _logger.LogWarning("SignalAggregator: Conflicting directional signals for NIFTY with equal priority. Rejecting both to prevent chop whipsaw. CE from: [{CeStrats}] vs PE from: [{PeStrats}]",
+                                ceNames, peNames);
+                        }
+                    }
+                    else if (ceSignals.Any())
+                    {
+                        var bestCe = ceSignals.OrderBy(s => s.Priority).First();
+                        _logger.LogInformation("SignalAggregator: Selected CE entry from {Strategy} (Priority {Priority})", bestCe.StrategyName, bestCe.Priority);
+                        aggregatedSignals.Add(bestCe);
+                    }
+                    else if (peSignals.Any())
+                    {
+                        var bestPe = peSignals.OrderBy(s => s.Priority).First();
+                        _logger.LogInformation("SignalAggregator: Selected PE entry from {Strategy} (Priority {Priority})", bestPe.StrategyName, bestPe.Priority);
+                        aggregatedSignals.Add(bestPe);
+                    }
                 }
-                else if (sellSignals.Any())
+                else
                 {
-                    var bestSell = sellSignals.OrderBy(s => s.Priority).First();
-                    _logger.LogInformation("SignalAggregator: Selected SELL signal from {Strategy} due to priority {Priority}", bestSell.StrategyName, bestSell.Priority);
-                    aggregatedSignals.Add(bestSell);
+                    // Non-NIFTY equities or individual instruments
+                    var buySignals = assetGroup.Where(s => s.Action == "BUY").ToList();
+                    var sellSignals = assetGroup.Where(s => s.Action == "SELL").ToList();
+
+                    if (buySignals.Any() && sellSignals.Any())
+                    {
+                        _logger.LogWarning("SignalAggregator: Conflicting BUY/SELL signals for {Asset}. Rejecting both.", asset);
+                        continue;
+                    }
+
+                    if (buySignals.Any())
+                    {
+                        aggregatedSignals.Add(buySignals.OrderBy(s => s.Priority).First());
+                    }
+                    else if (sellSignals.Any())
+                    {
+                        aggregatedSignals.Add(sellSignals.OrderBy(s => s.Priority).First());
+                    }
                 }
             }
 
             return aggregatedSignals;
+        }
+
+        private static string GetUnderlyingAsset(string instrument)
+        {
+            if (string.IsNullOrWhiteSpace(instrument)) return "UNKNOWN";
+            var upper = instrument.ToUpperInvariant();
+            if (upper.StartsWith("NIFTY")) return "NIFTY";
+            return upper;
+        }
+
+        private static bool IsCall(Signal signal)
+        {
+            if (signal.Action == "BUY_PE") return false;
+            if (signal.Instrument.Contains("PE", System.StringComparison.OrdinalIgnoreCase)) return false;
+            if (signal.Instrument.Contains("CE", System.StringComparison.OrdinalIgnoreCase)) return true;
+            return signal.Action == "BUY";
+        }
+
+        private static bool IsPut(Signal signal)
+        {
+            if (signal.Action == "BUY_PE") return true;
+            if (signal.Instrument.Contains("PE", System.StringComparison.OrdinalIgnoreCase)) return true;
+            if (signal.Instrument.Contains("CE", System.StringComparison.OrdinalIgnoreCase)) return false;
+            return signal.Action == "SELL";
         }
     }
 }

@@ -38,206 +38,195 @@ namespace StoicTrade.Api.Services
 
             bool isPaperMode = string.Equals(globalSettings.TradeMode, "Paper", System.StringComparison.OrdinalIgnoreCase);
 
-            if (isPaperMode)
+            // 1. Intercept EXIT action to cleanly close existing position
+            if (signal.Action == "EXIT")
             {
-                // 1. Intercept EXIT action to cleanly close existing position
-                if (signal.Action == "EXIT")
+                PaperPosition? openPosition = null;
+                if (!string.IsNullOrEmpty(signal.StrategyName))
                 {
-                    PaperPosition? openPosition = null;
-                    if (!string.IsNullOrEmpty(signal.StrategyName))
+                    openPosition = dbContext.PaperPositions.FirstOrDefault(p => 
+                        p.NetQty > 0 && 
+                        p.StrategyName == signal.StrategyName &&
+                        (string.IsNullOrEmpty(signal.Instrument) || signal.Instrument == "NIFTY" || NormaliseSymbol(p.Symbol) == NormaliseSymbol(signal.Instrument))
+                    );
+                }
+
+                if (openPosition == null && !string.IsNullOrEmpty(signal.Instrument) && signal.Instrument != "NIFTY")
+                {
+                    openPosition = dbContext.PaperPositions.FirstOrDefault(p => 
+                        p.NetQty > 0 && 
+                        NormaliseSymbol(p.Symbol) == NormaliseSymbol(signal.Instrument)
+                    );
+                }
+
+                if (openPosition != null)
+                {
+                    decimal? exitLtp = optionEngine.ResolveOptionLtp(openPosition.Symbol);
+                    decimal exitPrice = (exitLtp.HasValue && exitLtp.Value > 0)
+                        ? exitLtp.Value
+                        : (signal.ExpectedPrice > 0 && signal.ExpectedPrice < 5000 
+                            ? signal.ExpectedPrice 
+                            : (signal.Price > 0 && signal.Price < 5000 
+                                ? signal.Price 
+                                : ((openPosition.BuyAvg ?? 0m) > 0 ? (openPosition.BuyAvg ?? 0m) : 150m)));
+
+                    int exitQty = openPosition.NetQty;
+                    openPosition.TotalSellQty += exitQty;
+                    openPosition.TotalSellValue = (openPosition.TotalSellValue ?? 0m) + (exitQty * exitPrice);
+                    openPosition.SellAvg = openPosition.TotalSellQty > 0 ? (openPosition.TotalSellValue ?? 0m) / openPosition.TotalSellQty : exitPrice;
+                    openPosition.NetQty = 0;
+                    decimal tradePnl = (exitPrice - (openPosition.BuyAvg ?? 0m)) * exitQty;
+                    openPosition.RealizedProfit = (openPosition.RealizedProfit ?? 0m) + tradePnl;
+                    openPosition.UpdatedAt = System.DateTime.UtcNow;
+
+                    dbContext.TradeLogs.Add(new TradeLog
                     {
-                        openPosition = dbContext.PaperPositions.FirstOrDefault(p => 
-                            p.NetQty > 0 && 
-                            p.StrategyName == signal.StrategyName &&
-                            (string.IsNullOrEmpty(signal.Instrument) || signal.Instrument == "NIFTY" || NormaliseSymbol(p.Symbol) == NormaliseSymbol(signal.Instrument))
-                        );
+                        OrderId = System.Guid.NewGuid().ToString("N").Substring(0, 10).ToUpper(),
+                        StrategyName = openPosition.StrategyName ?? signal.StrategyName,
+                        Instrument = openPosition.Symbol,
+                        TradeType = "SELL",
+                        Quantity = exitQty,
+                        ExecutionPrice = exitPrice,
+                        Timestamp = System.DateTime.UtcNow,
+                        Status = "EXECUTED",
+                        Reason = "Strategy Exit Signal"
+                    });
+
+                    await dbContext.SaveChangesAsync();
+                    _logger.LogInformation("OrderManagementService [{Mode}]: Cleanly exited position for {Strategy} ({Symbol}) at ₹{ExitPrice}. Realized P&L: ₹{PnL:F2}", 
+                        isPaperMode ? "PAPER" : "LIVE", openPosition.StrategyName, openPosition.Symbol, exitPrice, openPosition.RealizedProfit);
+
+                    // If Live Mode, fire exit order to broker
+                    if (!isPaperMode && _fyersApiService.IsEngineRunning)
+                    {
+                        await _fyersApiService.PlaceOrderAsync(openPosition.Symbol, "SELL", exitQty, exitPrice);
                     }
 
-                    if (openPosition == null && !string.IsNullOrEmpty(signal.Instrument) && signal.Instrument != "NIFTY")
+                    // Clear Redis state for this strategy
+                    var redis = scope.ServiceProvider.GetService<RedisService>();
+                    if (redis != null && !string.IsNullOrEmpty(openPosition.StrategyName))
                     {
-                        openPosition = dbContext.PaperPositions.FirstOrDefault(p => 
-                            p.NetQty > 0 && 
-                            NormaliseSymbol(p.Symbol) == NormaliseSymbol(signal.Instrument)
-                        );
-                    }
-
-                    if (openPosition != null)
-                    {
-                        decimal? exitLtp = optionEngine.ResolveOptionLtp(openPosition.Symbol);
-                        decimal exitPrice = (exitLtp.HasValue && exitLtp.Value > 0)
-                            ? exitLtp.Value
-                            : (signal.ExpectedPrice > 0 && signal.ExpectedPrice < 5000 
-                                ? signal.ExpectedPrice 
-                                : (signal.Price > 0 && signal.Price < 5000 
-                                    ? signal.Price 
-                                    : ((openPosition.BuyAvg ?? 0m) > 0 ? (openPosition.BuyAvg ?? 0m) : 150m)));
-
-                        int exitQty = openPosition.NetQty;
-                        openPosition.TotalSellQty += exitQty;
-                        openPosition.TotalSellValue = (openPosition.TotalSellValue ?? 0m) + (exitQty * exitPrice);
-                        openPosition.SellAvg = openPosition.TotalSellQty > 0 ? (openPosition.TotalSellValue ?? 0m) / openPosition.TotalSellQty : exitPrice;
-                        openPosition.NetQty = 0;
-                        decimal tradePnl = (exitPrice - (openPosition.BuyAvg ?? 0m)) * exitQty;
-                        openPosition.RealizedProfit = (openPosition.RealizedProfit ?? 0m) + tradePnl;
-                        openPosition.UpdatedAt = System.DateTime.UtcNow;
-
-                        dbContext.TradeLogs.Add(new TradeLog
+                        var strat = dbContext.StrategyConfigs.FirstOrDefault(s => s.StrategyName == openPosition.StrategyName);
+                        if (strat != null)
                         {
-                            OrderId = System.Guid.NewGuid().ToString("N").Substring(0, 10).ToUpper(),
-                            StrategyName = openPosition.StrategyName ?? signal.StrategyName,
-                            Instrument = openPosition.Symbol,
-                            TradeType = "SELL",
-                            Quantity = exitQty,
-                            ExecutionPrice = exitPrice,
-                            Timestamp = System.DateTime.UtcNow,
-                            Status = "EXECUTED",
-                            Reason = "Strategy Exit Signal"
-                        });
-
-                        await dbContext.SaveChangesAsync();
-                        _logger.LogInformation("OrderManagementService [PAPER]: Cleanly exited position for {Strategy} ({Symbol}) at ₹{ExitPrice}. Realized P&L: ₹{PnL:F2}", 
-                            openPosition.StrategyName, openPosition.Symbol, exitPrice, openPosition.RealizedProfit);
-
-                        // Clear Redis state for this strategy
-                        var redis = scope.ServiceProvider.GetService<RedisService>();
-                        if (redis != null && !string.IsNullOrEmpty(openPosition.StrategyName))
-                        {
-                            var strat = dbContext.StrategyConfigs.FirstOrDefault(s => s.StrategyName == openPosition.StrategyName);
-                            if (strat != null)
-                            {
-                                await redis.DeleteKeyAsync($"strategy_state_{strat.Id}");
-                            }
+                            await redis.DeleteKeyAsync($"strategy_state_{strat.Id}");
                         }
-                        return true;
                     }
-                    else
-                    {
-                        _logger.LogWarning("OrderManagementService [PAPER]: EXIT signal for {Strategy} ({Instrument}) received, but no active open position was found. Skipping to prevent phantom sell order.",
-                            signal.StrategyName, signal.Instrument);
-                        return false;
-                    }
+                    return true;
                 }
-
-                // Handle BUY_PE bias
-                string bias = "BULLISH";
-                if (signal.Action == "BUY_PE")
+                else
                 {
-                    bias = "BEARISH";
-                    signal.Action = "BUY"; // Execution is a BUY of the PE option
-                }
-                else if (signal.Action == "BUY")
-                {
-                    bias = "BULLISH";
-                }
-
-                // If instrument is raw NIFTY or missing option type, resolve optimal ITM contract
-                if (signal.Instrument == "NIFTY" || (!signal.Instrument.Contains("CE") && !signal.Instrument.Contains("PE")))
-                {
-                    var contract = optionEngine.GetOptimalContract("NIFTY", bias, itmDistance: 1, expiryIndex: 2)
-                        ?? optionEngine.GetOptimalContract("NIFTY", bias, itmDistance: 1, expiryIndex: 1)
-                        ?? optionEngine.GetOptimalContract("NIFTY", bias, itmDistance: 0, expiryIndex: 1)
-                        ?? optionEngine.GetOptimalContract("NIFTY", bias, itmDistance: 1, expiryIndex: 0);
-
-                    if (!string.IsNullOrEmpty(contract))
-                    {
-                        signal.Instrument = contract.Replace("NSE:", "");
-                    }
-                }
-
-                var normalisedInstrument = NormaliseSymbol(signal.Instrument);
-
-                if (normalisedInstrument == "NIFTY")
-                {
-                    _logger.LogError("OrderManagementService [PAPER]: Failed to resolve tradeable option contract for {Strategy}. Aborting to prevent invalid NIFTY index trade.", signal.StrategyName);
+                    _logger.LogWarning("OrderManagementService: EXIT signal for {Strategy} ({Instrument}) received, but no active open position was found. Skipping to prevent phantom sell order.",
+                        signal.StrategyName, signal.Instrument);
                     return false;
                 }
+            }
 
-                // Always prioritize real-time live Market LTP at the exact moment of execution
-                decimal? currentLiveLtp = optionEngine.ResolveOptionLtp(normalisedInstrument);
-                decimal executionPrice = (currentLiveLtp.HasValue && currentLiveLtp.Value > 0)
-                    ? currentLiveLtp.Value
-                    : (signal.ExpectedPrice > 0 && signal.ExpectedPrice < 5000 
-                        ? signal.ExpectedPrice 
-                        : (signal.Price > 0 && signal.Price < 5000 ? signal.Price : 150m));
+            // Handle BUY_PE bias
+            string bias = "BULLISH";
+            if (signal.Action == "BUY_PE")
+            {
+                bias = "BEARISH";
+                signal.Action = "BUY"; // Execution is a BUY of the PE option
+            }
+            else if (signal.Action == "BUY")
+            {
+                bias = "BULLISH";
+            }
 
-                _logger.LogInformation("OrderManagementService [PAPER]: Executing order for {Action} {Quantity} {Instrument} at ₹{ExecutionPrice} ({Strategy})", 
-                    signal.Action, signal.Quantity, normalisedInstrument, executionPrice, signal.StrategyName);
+            // If instrument is raw NIFTY or missing option type, resolve optimal ITM contract
+            if (signal.Instrument == "NIFTY" || (!signal.Instrument.Contains("CE") && !signal.Instrument.Contains("PE")))
+            {
+                var contract = optionEngine.GetOptimalContract("NIFTY", bias, itmDistance: 1, expiryIndex: 2)
+                    ?? optionEngine.GetOptimalContract("NIFTY", bias, itmDistance: 1, expiryIndex: 1)
+                    ?? optionEngine.GetOptimalContract("NIFTY", bias, itmDistance: 0, expiryIndex: 1)
+                    ?? optionEngine.GetOptimalContract("NIFTY", bias, itmDistance: 1, expiryIndex: 0);
 
-                // Isolate position per (Symbol, StrategyName) so different strategies don't merge or overwrite each other
-                var position = dbContext.PaperPositions.FirstOrDefault(p => 
-                    p.Symbol == normalisedInstrument && 
-                    p.StrategyName == signal.StrategyName && 
-                    p.NetQty > 0);
-
-                if (position == null)
+                if (!string.IsNullOrEmpty(contract))
                 {
-                    position = new PaperPosition 
-                    { 
-                        Symbol = normalisedInstrument,
-                        StrategyName = signal.StrategyName,
-                        BuyAvg = 0m,
-                        SellAvg = 0m,
-                        RealizedProfit = 0m,
-                        TotalBuyQty = 0,
-                        TotalSellQty = 0,
-                        TotalBuyValue = 0m,
-                        TotalSellValue = 0m,
-                        PeakLtp = executionPrice
-                    };
-                    dbContext.PaperPositions.Add(position);
+                    signal.Instrument = contract.Replace("NSE:", "");
                 }
-
-                var stratConfig = dbContext.StrategyConfigs.FirstOrDefault(s => s.StrategyName == signal.StrategyName);
-                decimal trailingSl = (stratConfig != null && stratConfig.TrailingStopLossPoint > 0) 
-                    ? stratConfig.TrailingStopLossPoint 
-                    : (globalSettings?.TrailingStopLossPoint ?? 8.0m);
-
-                position.TotalBuyQty += signal.Quantity;
-                position.TotalBuyValue = (position.TotalBuyValue ?? 0m) + (signal.Quantity * executionPrice);
-                position.BuyAvg = position.TotalBuyQty > 0 ? (position.TotalBuyValue ?? 0m) / position.TotalBuyQty : executionPrice;
-                position.NetQty += signal.Quantity;
-                position.PeakLtp = executionPrice;
-                position.TrailingStopLossPoint = trailingSl > 0 ? trailingSl : 8.0m;
-                position.TargetPrice = signal.TargetPrice > 0 ? signal.TargetPrice : Math.Round(executionPrice * 1.25m, 2);
-                position.StopLossPrice = signal.StopLossPrice > 0 ? signal.StopLossPrice : Math.Round(Math.Max(5.0m, executionPrice * 0.85m), 2);
-                position.UpdatedAt = System.DateTime.UtcNow;
-
-                dbContext.TradeLogs.Add(new TradeLog
-                {
-                    OrderId = System.Guid.NewGuid().ToString("N").Substring(0, 10).ToUpper(),
-                    StrategyName = signal.StrategyName,
-                    Instrument = normalisedInstrument,
-                    TradeType = "BUY",
-                    Quantity = signal.Quantity,
-                    ExecutionPrice = executionPrice,
-                    Timestamp = System.DateTime.UtcNow,
-                    Status = "EXECUTED",
-                    Reason = "Strategy Entry Order"
-                });
-
-                await dbContext.SaveChangesAsync();
-                return true;
             }
 
-            // LIVE Trading Mode
-            _logger.LogInformation("OrderManagementService [LIVE]: Executing order for {Action} {Quantity} {Instrument} ({Strategy})", 
-                signal.Action, signal.Quantity, signal.Instrument, signal.StrategyName);
+            var normalisedInstrument = NormaliseSymbol(signal.Instrument);
 
-            string liveSymbol = signal.Instrument;
-            if (liveSymbol == "NIFTY" && !string.IsNullOrEmpty(signal.StrategyName))
+            if (normalisedInstrument == "NIFTY")
             {
-                var knownPos = dbContext.PaperPositions.FirstOrDefault(p => p.StrategyName == signal.StrategyName && p.NetQty > 0);
-                if (knownPos != null) liveSymbol = knownPos.Symbol;
-            }
-
-            if (liveSymbol == "NIFTY")
-            {
-                _logger.LogError("OrderManagementService [LIVE]: Failed to resolve tradeable symbol for {Strategy}. Aborting LIVE execution on NIFTY index.", signal.StrategyName);
+                _logger.LogError("OrderManagementService: Failed to resolve tradeable option contract for {Strategy}. Aborting to prevent invalid NIFTY index trade.", signal.StrategyName);
                 return false;
             }
 
-            string fyersAction = signal.Action == "EXIT" ? "SELL" : (signal.Action == "BUY_PE" ? "BUY" : signal.Action);
-            await _fyersApiService.PlaceOrderAsync(liveSymbol, fyersAction, signal.Quantity, signal.ExpectedPrice);
+            // Always prioritize real-time live Market LTP at the exact moment of execution
+            decimal? currentLiveLtp = optionEngine.ResolveOptionLtp(normalisedInstrument);
+            decimal executionPrice = (currentLiveLtp.HasValue && currentLiveLtp.Value > 0)
+                ? currentLiveLtp.Value
+                : (signal.ExpectedPrice > 0 && signal.ExpectedPrice < 5000 
+                    ? signal.ExpectedPrice 
+                    : (signal.Price > 0 && signal.Price < 5000 ? signal.Price : 150m));
+
+            _logger.LogInformation("OrderManagementService [{Mode}]: Executing order for {Action} {Quantity} {Instrument} at ₹{ExecutionPrice} ({Strategy})", 
+                isPaperMode ? "PAPER" : "LIVE", signal.Action, signal.Quantity, normalisedInstrument, executionPrice, signal.StrategyName);
+
+            // Isolate position per (Symbol, StrategyName) so different strategies don't merge or overwrite each other
+            var position = dbContext.PaperPositions.FirstOrDefault(p => 
+                p.Symbol == normalisedInstrument && 
+                p.StrategyName == signal.StrategyName && 
+                p.NetQty > 0);
+
+            if (position == null)
+            {
+                position = new PaperPosition 
+                { 
+                    Symbol = normalisedInstrument,
+                    StrategyName = signal.StrategyName,
+                    BuyAvg = 0m,
+                    SellAvg = 0m,
+                    RealizedProfit = 0m,
+                    TotalBuyQty = 0,
+                    TotalSellQty = 0,
+                    TotalBuyValue = 0m,
+                    TotalSellValue = 0m,
+                    PeakLtp = executionPrice
+                };
+                dbContext.PaperPositions.Add(position);
+            }
+
+            var stratConfig = dbContext.StrategyConfigs.FirstOrDefault(s => s.StrategyName == signal.StrategyName);
+            decimal trailingSl = (stratConfig != null && stratConfig.TrailingStopLossPoint > 0) 
+                ? stratConfig.TrailingStopLossPoint 
+                : (globalSettings?.TrailingStopLossPoint ?? 8.0m);
+
+            position.TotalBuyQty += signal.Quantity;
+            position.TotalBuyValue = (position.TotalBuyValue ?? 0m) + (signal.Quantity * executionPrice);
+            position.BuyAvg = position.TotalBuyQty > 0 ? (position.TotalBuyValue ?? 0m) / position.TotalBuyQty : executionPrice;
+            position.NetQty += signal.Quantity;
+            position.PeakLtp = executionPrice;
+            position.TrailingStopLossPoint = trailingSl > 0 ? trailingSl : 8.0m;
+            position.TargetPrice = signal.TargetPrice > 0 ? signal.TargetPrice : Math.Round(executionPrice * 1.25m, 2);
+            position.StopLossPrice = signal.StopLossPrice > 0 ? signal.StopLossPrice : Math.Round(Math.Max(5.0m, executionPrice * 0.85m), 2);
+            position.UpdatedAt = System.DateTime.UtcNow;
+
+            dbContext.TradeLogs.Add(new TradeLog
+            {
+                OrderId = System.Guid.NewGuid().ToString("N").Substring(0, 10).ToUpper(),
+                StrategyName = signal.StrategyName,
+                Instrument = normalisedInstrument,
+                TradeType = "BUY",
+                Quantity = signal.Quantity,
+                ExecutionPrice = executionPrice,
+                Timestamp = System.DateTime.UtcNow,
+                Status = "EXECUTED",
+                Reason = "Strategy Entry Order"
+            });
+
+            await dbContext.SaveChangesAsync();
+
+            // If Live Mode, dispatch real order to Fyers
+            if (!isPaperMode && _fyersApiService.IsEngineRunning)
+            {
+                await _fyersApiService.PlaceOrderAsync(normalisedInstrument, "BUY", signal.Quantity, executionPrice);
+            }
+
             return true;
         }
 
@@ -286,12 +275,17 @@ namespace StoicTrade.Api.Services
                 bool isTargetHit = pos.TargetPrice.HasValue && pos.TargetPrice.Value > 0 && currentLtp >= pos.TargetPrice.Value;
                 // 3. Check Stop Loss / Trailing Stop Loss Hit
                 bool isSlHit = pos.StopLossPrice.HasValue && pos.StopLossPrice.Value > 0 && currentLtp <= pos.StopLossPrice.Value;
+                // 4. Check Individual Trade Max Loss Limit
+                decimal currentTradeLoss = ((pos.BuyAvg ?? 0m) - currentLtp) * pos.NetQty;
+                bool isMaxLossHit = globalSettings != null && globalSettings.MaxLossPerTrade > 0 && currentTradeLoss >= globalSettings.MaxLossPerTrade;
 
-                if (isTargetHit || isSlHit)
+                if (isTargetHit || isSlHit || isMaxLossHit)
                 {
                     string exitReason = isTargetHit 
                         ? $"Target Hit (LTP ₹{currentLtp:F2} >= Target ₹{pos.TargetPrice:F2})" 
-                        : $"Stop Loss Hit (LTP ₹{currentLtp:F2} <= SL ₹{pos.StopLossPrice:F2})";
+                        : (isMaxLossHit 
+                            ? $"Max Loss Per Trade Hit (Current Loss ₹{currentTradeLoss:F2} >= Limit ₹{globalSettings!.MaxLossPerTrade:F2})"
+                            : $"Stop Loss Hit (LTP ₹{currentLtp:F2} <= SL ₹{pos.StopLossPrice:F2})");
 
                     int exitQty = pos.NetQty;
                     pos.TotalSellQty += exitQty;

@@ -164,6 +164,36 @@ using (var scope = app.Services.CreateScope())
 
     try
     {
+        dbContext.Database.ExecuteSqlRaw("ALTER TABLE GlobalSettings ADD COLUMN MaxActivePositions INTEGER DEFAULT 1");
+    }
+    catch {}
+
+    try
+    {
+        dbContext.Database.ExecuteSqlRaw("ALTER TABLE GlobalSettings ADD COLUMN MaxCapitalPerTrade TEXT DEFAULT '200000'");
+    }
+    catch {}
+
+    try
+    {
+        dbContext.Database.ExecuteSqlRaw("ALTER TABLE GlobalSettings ADD COLUMN DisallowOppositeLegs INTEGER DEFAULT 1");
+    }
+    catch {}
+
+    try
+    {
+        dbContext.Database.ExecuteSqlRaw("ALTER TABLE GlobalSettings ADD COLUMN AllowHtfReversalOverwrite INTEGER DEFAULT 1");
+    }
+    catch {}
+
+    try
+    {
+        dbContext.Database.ExecuteSqlRaw("ALTER TABLE GlobalSettings ADD COLUMN PreventSameStrategyPyramiding INTEGER DEFAULT 1");
+    }
+    catch {}
+
+    try
+    {
         dbContext.Database.ExecuteSqlRaw(@"
             CREATE TABLE IF NOT EXISTS PaperPositions (
                 Id TEXT PRIMARY KEY,

@@ -56,6 +56,12 @@ namespace StoicTrade.Api.Controllers
             settings.BaseLotSize = updatedSettings.BaseLotSize > 0 ? updatedSettings.BaseLotSize : 65;
             settings.TrailingStopLossPoint = updatedSettings.TrailingStopLossPoint;
 
+            settings.MaxActivePositions = updatedSettings.MaxActivePositions > 0 ? updatedSettings.MaxActivePositions : 1;
+            settings.MaxCapitalPerTrade = updatedSettings.MaxCapitalPerTrade > 0 ? updatedSettings.MaxCapitalPerTrade : 200000m;
+            settings.DisallowOppositeLegs = updatedSettings.DisallowOppositeLegs;
+            settings.AllowHtfReversalOverwrite = updatedSettings.AllowHtfReversalOverwrite;
+            settings.PreventSameStrategyPyramiding = updatedSettings.PreventSameStrategyPyramiding;
+
             await _context.SaveChangesAsync();
             return NoContent();
         }

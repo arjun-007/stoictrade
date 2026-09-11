@@ -22,5 +22,12 @@ namespace StoicTrade.Api.Models
         public int AutoTradeLots { get; set; } = 1;
         public int BaseLotSize { get; set; } = 65;
         public decimal TrailingStopLossPoint { get; set; } = 8.0m;
+
+        // Concurrency & Risk Guard Rails
+        public int MaxActivePositions { get; set; } = 1;
+        public decimal MaxCapitalPerTrade { get; set; } = 200000m;
+        public bool DisallowOppositeLegs { get; set; } = true;
+        public bool AllowHtfReversalOverwrite { get; set; } = true;
+        public bool PreventSameStrategyPyramiding { get; set; } = true;
     }
 }
