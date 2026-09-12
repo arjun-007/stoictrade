@@ -5,6 +5,7 @@ import * as Haptics from 'expo-haptics';
 import { COLORS } from '../lib/theme';
 import { apiClient } from '../lib/api';
 import { OrderBottomSheet } from '../components/OrderBottomSheet';
+import { formatInstrumentName } from '../lib/formatters';
 
 interface StrikeData {
   strike: number;
@@ -15,8 +16,23 @@ interface StrikeData {
   isAtm?: boolean;
 }
 
+function getNearestTuesdayExpiry(): string {
+  const today = new Date();
+  const dayOfWeek = today.getDay(); // 0=Sun, 2=Tue
+  const daysUntilTuesday = (2 - dayOfWeek + 7) % 7;
+  const tues = new Date(today);
+  tues.setDate(today.getDate() + daysUntilTuesday);
+
+  const yearShort = String(tues.getFullYear()).substring(2);
+  const month = tues.getMonth() + 1;
+  const monthChar = month <= 9 ? String(month) : month === 10 ? 'O' : month === 11 ? 'N' : 'D';
+  const dd = String(tues.getDate()).padStart(2, '0');
+  return `${yearShort}${monthChar}${dd}`;
+}
+
 export const WatchlistScreen: React.FC = () => {
   const [spotPrice, setSpotPrice] = useState(24250);
+  const [spotChange, setSpotChange] = useState<number>(0);
   const [strikes, setStrikes] = useState<StrikeData[]>([]);
   const [refreshing, setRefreshing] = useState(false);
   const [selectedOrder, setSelectedOrder] = useState<{
@@ -34,6 +50,7 @@ export const WatchlistScreen: React.FC = () => {
   const generateStrikesForSpot = (spot: number): StrikeData[] => {
     const atmStrike = Math.round(spot / 50) * 50;
     const strikeList: StrikeData[] = [];
+    const expiry = getNearestTuesdayExpiry();
 
     // Generate 5 ITM and 5 OTM strikes
     for (let i = -4; i <= 4; i++) {
@@ -50,9 +67,9 @@ export const WatchlistScreen: React.FC = () => {
 
       strikeList.push({
         strike,
-        ceSymbol: `NIFTY26908${strike}CE`,
+        ceSymbol: `NIFTY${expiry}${strike}CE`,
         ceLtp,
-        peSymbol: `NIFTY26908${strike}PE`,
+        peSymbol: `NIFTY${expiry}${strike}PE`,
         peLtp,
         isAtm: strike === atmStrike,
       });
@@ -63,16 +80,73 @@ export const WatchlistScreen: React.FC = () => {
 
   const fetchMarketData = async () => {
     try {
-      const res = await apiClient.get('/api/marketdata/spot?symbol=NIFTY');
-      if (res.data?.price) {
-        const spot = res.data.price;
+      const res = await apiClient.get('/api/marketdata/all');
+      const data = res.data;
+
+      const spot = data?.options?.records?.underlyingValue
+        ?? data?.options?.underlyingValue
+        ?? data?.spots?.NIFTY?.price
+        ?? data?.spots?.NIFTY?.lastPrice
+        ?? spotPrice;
+
+      if (spot > 0) {
         setSpotPrice(spot);
-        setStrikes(generateStrikesForSpot(spot));
-      } else {
+        if (data?.spots?.NIFTY?.change !== undefined) {
+          setSpotChange(data.spots.NIFTY.change);
+        }
+      }
+
+      const records: any[] = data?.options?.records?.data || data?.options?.data || [];
+      if (records.length > 0) {
+        const atmStrike = Math.round(spot / 50) * 50;
+        const nearRecords = records.filter(
+          (r: any) => Math.abs((r.strikePrice ?? 0) - atmStrike) <= 250
+        );
+
+        if (nearRecords.length > 0) {
+          const byStrike = new Map<number, any>();
+          nearRecords.forEach((r: any) => {
+            const st = r.strikePrice;
+            if (!byStrike.has(st)) byStrike.set(st, r);
+          });
+
+          const sortedStrikes = Array.from(byStrike.keys()).sort((a, b) => a - b);
+          const parsed: StrikeData[] = sortedStrikes.map((strike) => {
+            const row = byStrike.get(strike);
+            const rawExpiry = row.expiryDate ? (row.expiryDate.startsWith('NIFTY') ? row.expiryDate.substring(5) : row.expiryDate) : getNearestTuesdayExpiry();
+            const ceLtp = row.CE?.lastPrice ?? (Math.max(0, spot - strike) + 45);
+            const peLtp = row.PE?.lastPrice ?? (Math.max(0, strike - spot) + 45);
+
+            return {
+              strike,
+              ceSymbol: `NIFTY${rawExpiry}${strike}CE`,
+              ceLtp: Math.round(ceLtp * 100) / 100,
+              peSymbol: `NIFTY${rawExpiry}${strike}PE`,
+              peLtp: Math.round(peLtp * 100) / 100,
+              isAtm: strike === atmStrike,
+            };
+          });
+
+          setStrikes(parsed);
+          return;
+        }
+      }
+
+      setStrikes(generateStrikesForSpot(spot));
+    } catch {
+      try {
+        const spotRes = await apiClient.get('/api/marketdata/spot?symbol=NIFTY');
+        if (spotRes.data?.price) {
+          const sp = spotRes.data.price;
+          setSpotPrice(sp);
+          setSpotChange(spotRes.data.change || 0);
+          setStrikes(generateStrikesForSpot(sp));
+        } else {
+          setStrikes(generateStrikesForSpot(spotPrice));
+        }
+      } catch {
         setStrikes(generateStrikesForSpot(spotPrice));
       }
-    } catch {
-      setStrikes(generateStrikesForSpot(spotPrice));
     }
   };
 
@@ -132,8 +206,15 @@ export const WatchlistScreen: React.FC = () => {
           <Text style={styles.chainSubtitle}>Tap CE / PE to launch 1-tap mobile order ticket</Text>
         </View>
         <View style={styles.spotTag}>
-          <Text style={styles.spotTagLabel}>NIFTY</Text>
-          <Text style={styles.spotTagValue}>₹{spotPrice.toFixed(2)}</Text>
+          <Text style={styles.spotTagLabel}>NIFTY SPOT</Text>
+          <View style={{ flexDirection: 'row', alignItems: 'baseline', gap: 4 }}>
+            <Text style={styles.spotTagValue}>₹{spotPrice.toFixed(2)}</Text>
+            {spotChange !== 0 && (
+              <Text style={{ fontSize: 11, fontWeight: '700', color: spotChange >= 0 ? COLORS.profit : COLORS.loss }}>
+                ({spotChange >= 0 ? `+${spotChange.toFixed(2)}` : spotChange.toFixed(2)})
+              </Text>
+            )}
+          </View>
         </View>
       </View>
 

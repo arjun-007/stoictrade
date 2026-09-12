@@ -17,6 +17,7 @@ import { AnalysisScreen } from './screens/AnalysisScreen';
 import { PositionsScreen } from './screens/PositionsScreen';
 import { SettingsScreen } from './screens/SettingsScreen';
 import { LoginScreen } from './screens/LoginScreen';
+import { GlobalPendingApprovalsBanner } from './components/GlobalPendingApprovalsBanner';
 import { setupNotificationChannels, registerForPushNotificationsAsync } from './lib/notifications';
 import { getAuthToken, clearAuthToken } from './lib/auth';
 
@@ -142,6 +143,9 @@ export default function App() {
         onToggleEngine={handleToggleEngine}
         onEmergencyPress={handleEmergencySquareOff}
       />
+
+      {/* Global Pending Approvals Sticky Banner */}
+      <GlobalPendingApprovalsBanner />
 
       {/* Screen Content */}
       <View style={styles.content}>

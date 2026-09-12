@@ -14,6 +14,7 @@ export interface SignalLogData {
   stopLossPrice?: number;
   quantity: number;
   status: string;
+  rejectionReason?: string;
   generatedAt: string;
   expiresAt?: string;
 }
@@ -32,7 +33,15 @@ export const SignalLogCard: React.FC<SignalLogCardProps> = ({ signal }) => {
     ? new Date(signal.expiresAt).getTime() < Date.now()
     : Date.now() - new Date(signal.generatedAt).getTime() > 15 * 60 * 1000;
 
-  const timeStr = new Date(signal.generatedAt).toLocaleTimeString([], {
+  const signalDate = new Date(signal.generatedAt);
+  const today = new Date();
+  const isToday = signalDate.toDateString() === today.toDateString();
+  const yesterday = new Date();
+  yesterday.setDate(today.getDate() - 1);
+  const isYesterday = signalDate.toDateString() === yesterday.toDateString();
+  const dateBadgeText = isToday ? 'Today' : isYesterday ? 'Yesterday' : signalDate.toLocaleDateString([], { day: '2-digit', month: 'short' });
+
+  const timeStr = signalDate.toLocaleTimeString([], {
     hour: '2-digit',
     minute: '2-digit',
     second: '2-digit',
@@ -62,6 +71,9 @@ export const SignalLogCard: React.FC<SignalLogCardProps> = ({ signal }) => {
         <View style={styles.timeArea}>
           <Clock size={12} color={COLORS.textSubtle} />
           <Text style={styles.timeText}>{timeStr}</Text>
+          <View style={styles.dateBadge}>
+            <Text style={styles.dateBadgeText}>{dateBadgeText}</Text>
+          </View>
         </View>
 
         <View style={styles.badgeGroup}>
@@ -69,7 +81,7 @@ export const SignalLogCard: React.FC<SignalLogCardProps> = ({ signal }) => {
             <Text style={[styles.statusText, { color: status.text }]}>{status.label}</Text>
           </View>
           
-          {!isExit && (
+          {!isExit && signal.status !== 'Blocked' && (
             <View style={[styles.validityPill, isExpired ? styles.pillExpired : styles.pillActive]}>
               <Text style={[styles.validityText, isExpired ? styles.textExpired : styles.textActive]}>
                 {isExpired ? 'Expired' : 'Active'}
@@ -81,6 +93,14 @@ export const SignalLogCard: React.FC<SignalLogCardProps> = ({ signal }) => {
 
       {/* Main Signal Info */}
       <Text style={styles.strategyName}>{signal.strategyName}</Text>
+
+      {signal.status === 'Blocked' && signal.rejectionReason && (
+        <View style={styles.rejectionRow}>
+          <Text style={styles.rejectionText} numberOfLines={2}>
+            ⚠️ {signal.rejectionReason}
+          </Text>
+        </View>
+      )}
 
       <View style={styles.instrumentRow}>
         <View style={[styles.actionTag, isBuy ? styles.tagBuy : isExit ? styles.tagExit : isBuyPe ? styles.tagSell : styles.tagSell]}>
@@ -263,5 +283,33 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: '800',
     color: COLORS.text,
+  },
+  dateBadge: {
+    backgroundColor: COLORS.bg,
+    paddingHorizontal: 6,
+    paddingVertical: 1,
+    borderRadius: 4,
+    borderWidth: 0.5,
+    borderColor: COLORS.surfaceBorder,
+    marginLeft: 4,
+  },
+  dateBadgeText: {
+    fontSize: 9,
+    fontWeight: '700',
+    color: COLORS.textMuted,
+  },
+  rejectionRow: {
+    backgroundColor: 'rgba(239, 68, 68, 0.1)',
+    borderRadius: 6,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderWidth: 0.5,
+    borderColor: 'rgba(239, 68, 68, 0.3)',
+    marginBottom: 8,
+  },
+  rejectionText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: COLORS.loss,
   },
 });

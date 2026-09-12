@@ -18,6 +18,7 @@ import {
   AlertTriangle,
   Play,
   Square,
+  Pause,
 } from 'lucide-react-native';
 import * as Haptics from 'expo-haptics';
 import { COLORS } from '../lib/theme';
@@ -125,6 +126,31 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ onNavigateToTa
     } catch (err: any) {
       Alert.alert('Engine Error', err.response?.data?.error || 'Failed to toggle engine');
     }
+  };
+
+  const handleStopNewTrades = () => {
+    Alert.alert(
+      'Stop New Trades',
+      'Are you sure you want to stop new trades? This will pause the Strategy Engine from taking new entries while keeping open positions monitored.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'STOP NEW TRADES',
+          style: 'destructive',
+          onPress: async () => {
+            Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+            try {
+              await apiClient.post('/api/engine/stop');
+              setIsEngineRunning(false);
+              Alert.alert('Trading Paused', 'Strategy Engine stopped. No new trades will be initiated.');
+              fetchDashboardData();
+            } catch (err: any) {
+              Alert.alert('Error', err.response?.data?.error || 'Failed to stop new trades');
+            }
+          },
+        },
+      ]
+    );
   };
 
   const handleEmergencySquareOff = () => {
@@ -237,6 +263,17 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ onNavigateToTa
               </>
             )}
           </TouchableOpacity>
+
+          {isEngineRunning && (
+            <TouchableOpacity
+              style={styles.stopTradesBtn}
+              onPress={handleStopNewTrades}
+              activeOpacity={0.85}
+            >
+              <Pause size={18} color="#ffffff" />
+              <Text style={styles.btnTextWhite}>Stop New Trades</Text>
+            </TouchableOpacity>
+          )}
         </View>
       </View>
 
@@ -333,6 +370,16 @@ const styles = StyleSheet.create({
   },
   engineStop: {
     backgroundColor: COLORS.warning,
+  },
+  stopTradesBtn: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    paddingVertical: 14,
+    borderRadius: 12,
+    backgroundColor: '#f97316',
   },
   btnTextWhite: {
     fontSize: 15,

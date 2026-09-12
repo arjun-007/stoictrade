@@ -20,6 +20,7 @@ import {
   Lock,
   Flame,
   Save,
+  ShieldCheck,
 } from 'lucide-react-native';
 import * as Haptics from 'expo-haptics';
 import { COLORS } from '../lib/theme';
@@ -40,6 +41,11 @@ export interface FullGlobalSettings {
   autoTradeLots: number;
   baseLotSize: number;
   trailingStopLossPoint: number;
+  maxActivePositions: number;
+  maxCapitalPerTrade: number;
+  disallowOppositeLegs: boolean;
+  allowHtfReversalOverwrite: boolean;
+  preventSameStrategyPyramiding: boolean;
 }
 
 export const SettingsScreen: React.FC = () => {
@@ -57,6 +63,11 @@ export const SettingsScreen: React.FC = () => {
     autoTradeLots: 1,
     baseLotSize: 65,
     trailingStopLossPoint: 8,
+    maxActivePositions: 1,
+    maxCapitalPerTrade: 200000,
+    disallowOppositeLegs: true,
+    allowHtfReversalOverwrite: true,
+    preventSameStrategyPyramiding: true,
   });
 
   const [loading, setLoading] = useState(true);
@@ -322,6 +333,94 @@ export const SettingsScreen: React.FC = () => {
         </View>
       </View>
 
+      {/* 7. Portfolio Concurrency & Capital Guards */}
+      <View style={styles.card}>
+        <View style={styles.cardHeader}>
+          <ShieldCheck size={18} color={COLORS.profit} />
+          <Text style={styles.cardTitle}>Portfolio Concurrency & Capital Guards</Text>
+        </View>
+
+        <View style={styles.gridRow}>
+          <View style={styles.inputCol}>
+            <Text style={styles.inputLabel}>Max Active Positions</Text>
+            <TextInput
+              style={styles.input}
+              value={settings.maxActivePositions?.toString()}
+              onChangeText={(val) => handleFieldChange('maxActivePositions', parseInt(val) || 1)}
+              keyboardType="numeric"
+            />
+            <Text style={styles.fieldHint}>Limits concurrent trades across all strategies</Text>
+          </View>
+          <View style={styles.inputCol}>
+            <Text style={styles.inputLabel}>Max Capital / Trade (₹)</Text>
+            <TextInput
+              style={styles.input}
+              value={settings.maxCapitalPerTrade?.toString()}
+              onChangeText={(val) => handleFieldChange('maxCapitalPerTrade', parseFloat(val) || 0)}
+              keyboardType="numeric"
+            />
+            <Text style={styles.fieldHint}>Max capital required (Lots × Qty × Premium)</Text>
+          </View>
+        </View>
+
+        {/* Guard 1: Prevent Opposite Legs */}
+        <View style={styles.guardSwitchRow}>
+          <View style={{ flex: 1, paddingRight: 10 }}>
+            <Text style={styles.guardSwitchTitle}>No Opposite Legs (CE + PE Conflict)</Text>
+            <Text style={styles.guardSwitchDesc}>
+              Prevents self-hedging positions where theta decay eats both long call and put options during range-bound conditions.
+            </Text>
+          </View>
+          <Switch
+            value={settings.disallowOppositeLegs ?? true}
+            onValueChange={(val) => {
+              handleFieldChange('disallowOppositeLegs', val);
+              Haptics.selectionAsync();
+            }}
+            trackColor={{ false: '#334155', true: COLORS.profit }}
+            thumbColor="#ffffff"
+          />
+        </View>
+
+        {/* Guard 2: HTF Reversal Overwrite */}
+        <View style={styles.guardSwitchRow}>
+          <View style={{ flex: 1, paddingRight: 10 }}>
+            <Text style={styles.guardSwitchTitle}>Allow HTF Reversal Overwrite</Text>
+            <Text style={styles.guardSwitchDesc}>
+              When 15m trend reversal confirms, existing opposite position is cleanly exited before reversal entry is placed.
+            </Text>
+          </View>
+          <Switch
+            value={settings.allowHtfReversalOverwrite ?? true}
+            onValueChange={(val) => {
+              handleFieldChange('allowHtfReversalOverwrite', val);
+              Haptics.selectionAsync();
+            }}
+            trackColor={{ false: '#334155', true: COLORS.profit }}
+            thumbColor="#ffffff"
+          />
+        </View>
+
+        {/* Guard 3: Prevent Same Strategy Pyramiding */}
+        <View style={styles.guardSwitchRow}>
+          <View style={{ flex: 1, paddingRight: 10 }}>
+            <Text style={styles.guardSwitchTitle}>Prevent Same-Strategy Pyramiding</Text>
+            <Text style={styles.guardSwitchDesc}>
+              Blocks duplicate entry signals for a strategy that already holds an active position in that direction.
+            </Text>
+          </View>
+          <Switch
+            value={settings.preventSameStrategyPyramiding ?? true}
+            onValueChange={(val) => {
+              handleFieldChange('preventSameStrategyPyramiding', val);
+              Haptics.selectionAsync();
+            }}
+            trackColor={{ false: '#334155', true: COLORS.profit }}
+            thumbColor="#ffffff"
+          />
+        </View>
+      </View>
+
       {/* Save Button */}
       <TouchableOpacity
         style={styles.saveBtn}
@@ -477,5 +576,31 @@ const styles = StyleSheet.create({
     fontSize: 15,
     fontWeight: '900',
     color: '#ffffff',
+  },
+  fieldHint: {
+    fontSize: 9,
+    color: COLORS.textSubtle,
+    marginTop: 3,
+    lineHeight: 12,
+  },
+  guardSwitchRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 12,
+    borderTopWidth: 1,
+    borderTopColor: COLORS.surfaceBorder,
+    marginTop: 10,
+  },
+  guardSwitchTitle: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: COLORS.text,
+  },
+  guardSwitchDesc: {
+    fontSize: 11,
+    color: COLORS.textMuted,
+    lineHeight: 15,
+    marginTop: 2,
   },
 });

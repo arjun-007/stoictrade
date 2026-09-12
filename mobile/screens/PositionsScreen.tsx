@@ -34,18 +34,21 @@ export const PositionsScreen: React.FC = () => {
         }
         const netList = Array.isArray(data) ? data : (data?.netPositions || []);
         netList.forEach((p: any) => {
-          const qty = Math.abs(p.netQty ?? 0);
+          const netQty = p.netQty ?? 0;
+          const tradeQty = p.tradeQty ?? p.qty ?? Math.abs(netQty);
           const rawSymbol: string = p.symbol ?? '-';
           const symbol = rawSymbol.startsWith('NIFTYNIFTY') ? rawSymbol.substring(5) : rawSymbol;
           const buyAvg = p.buyAvg ?? 0;
           const sellAvg = p.sellAvg ?? 0;
           const ltp = p.ltp ?? p.buyAvg ?? 0;
-          const realizedProfit = p.realized_profit ?? p.realizedProfit ?? 0;
-          const unrealizedPnL = p.unrealized_profit ?? p.unrealizedPnL ?? (qty > 0 ? (ltp - buyAvg) * (p.netQty ?? 0) : 0);
+          const rawRealized = p.realized_profit ?? p.realizedProfit ?? 0;
+          const realizedProfit = (rawRealized !== 0) ? rawRealized : (netQty === 0 && sellAvg > 0 && buyAvg > 0 ? (sellAvg - buyAvg) * (tradeQty || 65) : 0);
+          const unrealizedPnL = p.unrealized_profit ?? p.unrealizedPnL ?? (Math.abs(netQty) > 0 ? (ltp - buyAvg) * netQty : 0);
 
           allPositions.push({
             symbol,
-            netQty: p.netQty ?? 0,
+            netQty,
+            tradeQty,
             buyAvg,
             sellAvg,
             ltp,
@@ -54,8 +57,9 @@ export const PositionsScreen: React.FC = () => {
             targetPrice: p.targetPrice && p.targetPrice > 0 ? p.targetPrice : (buyAvg > 0 ? buyAvg * 1.25 : undefined),
             stopLossPrice: p.stopLossPrice && p.stopLossPrice > 0 ? p.stopLossPrice : (buyAvg > 0 ? Math.max(5, buyAvg * 0.85) : undefined),
             trailingStopLossPoint: p.trailingStopLossPoint,
+            peakLtp: p.peakLtp,
             strategyName: p.strategyName,
-            status: qty === 0 ? 'EXITED' : 'ACTIVE',
+            status: netQty === 0 ? 'EXITED' : 'ACTIVE',
             category: p.isCarryForward ? 'HOLDING' : 'DAY',
           });
         });
@@ -194,7 +198,7 @@ export const PositionsScreen: React.FC = () => {
     .reduce((acc, p) => acc + (p.unrealizedPnL || 0), 0);
 
   const totalRealized = positions
-    .filter((p) => p.category === activeCategory)
+    .filter((p) => p.category === activeCategory && p.status === 'EXITED')
     .reduce((acc, p) => acc + (p.realizedProfit || 0), 0);
 
   const netDayPnL = totalRealized + totalUnrealized;

@@ -1,6 +1,6 @@
 import React from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, Switch } from 'react-native';
-import { Layers, CheckCircle2, Shield, Activity } from 'lucide-react-native';
+import { Layers, CheckCircle2, Shield, Activity, Edit3 } from 'lucide-react-native';
 import { COLORS } from '../lib/theme';
 
 export interface StrategyGroupData {
@@ -14,6 +14,7 @@ export interface StrategyGroupData {
   operatingMode: string;
   perTradeStopLossPoint: number;
   perTradeGainPoint: number;
+  trailingStopLossPoint?: number;
   timeframeMinutes: number;
 }
 
@@ -21,12 +22,14 @@ interface SquadCardProps {
   squad: StrategyGroupData;
   allStrategies: { id: number; strategyName: string }[];
   onToggle: (id: number, currentValue: boolean) => void;
+  onEdit?: (squad: StrategyGroupData) => void;
 }
 
 export const SquadCard: React.FC<SquadCardProps> = ({
   squad,
   allStrategies,
   onToggle,
+  onEdit,
 }) => {
   let memberIds: number[] = [];
   try {
@@ -62,12 +65,24 @@ export const SquadCard: React.FC<SquadCardProps> = ({
           <Text style={styles.squadName}>{squad.name}</Text>
         </View>
 
-        <Switch
-          value={squad.isEnabled}
-          onValueChange={() => onToggle(squad.id, squad.isEnabled)}
-          trackColor={{ false: '#334155', true: COLORS.primary }}
-          thumbColor={squad.isEnabled ? '#ffffff' : '#94a3b8'}
-        />
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+          {onEdit && (
+            <TouchableOpacity
+              onPress={() => onEdit(squad)}
+              style={styles.editBtn}
+              activeOpacity={0.7}
+            >
+              <Edit3 size={15} color={COLORS.textMuted} />
+            </TouchableOpacity>
+          )}
+
+          <Switch
+            value={squad.isEnabled}
+            onValueChange={() => onToggle(squad.id, squad.isEnabled)}
+            trackColor={{ false: '#334155', true: COLORS.primary }}
+            thumbColor={squad.isEnabled ? '#ffffff' : '#94a3b8'}
+          />
+        </View>
       </View>
 
       <Text style={styles.description} numberOfLines={2}>{squad.description}</Text>
@@ -99,6 +114,9 @@ export const SquadCard: React.FC<SquadCardProps> = ({
       <View style={styles.metricsRow}>
         <Text style={styles.paramText}>🎯 Target: <Text style={{ color: COLORS.profit, fontWeight: '700' }}>+{squad.perTradeGainPoint} pts</Text></Text>
         <Text style={styles.paramText}>🛑 Stop-Loss: <Text style={{ color: COLORS.loss, fontWeight: '700' }}>-{squad.perTradeStopLossPoint} pts</Text></Text>
+        {squad.trailingStopLossPoint !== undefined && squad.trailingStopLossPoint > 0 && (
+          <Text style={styles.paramText}>⚡ Trail: <Text style={{ color: COLORS.primary, fontWeight: '700' }}>{squad.trailingStopLossPoint}pt</Text></Text>
+        )}
         <Text style={styles.paramText}>⏱ {squad.timeframeMinutes}m</Text>
       </View>
     </View>
@@ -212,5 +230,12 @@ const styles = StyleSheet.create({
   paramText: {
     fontSize: 11,
     color: COLORS.textMuted,
+  },
+  editBtn: {
+    padding: 6,
+    borderRadius: 6,
+    backgroundColor: COLORS.bg,
+    borderWidth: 1,
+    borderColor: COLORS.surfaceBorder,
   },
 });

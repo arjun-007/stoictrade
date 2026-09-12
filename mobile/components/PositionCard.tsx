@@ -8,6 +8,7 @@ import { formatInstrumentName } from '../lib/formatters';
 export interface PositionData {
   symbol: string;
   netQty: number;
+  tradeQty?: number;
   buyAvg: number;
   sellAvg: number;
   ltp: number;
@@ -16,6 +17,7 @@ export interface PositionData {
   targetPrice?: number;
   stopLossPrice?: number;
   trailingStopLossPoint?: number;
+  peakLtp?: number;
   strategyName?: string;
   status?: 'ACTIVE' | 'EXITED';
   category?: 'DAY' | 'HOLDING';
@@ -29,8 +31,11 @@ interface PositionCardProps {
 export const PositionCard: React.FC<PositionCardProps> = ({ position, onClose }) => {
   const isExited = position.netQty === 0 || position.status === 'EXITED';
   const isLong = position.netQty > 0;
-  const isProfit = isExited ? (position.realizedProfit >= 0) : (position.unrealizedPnL >= 0);
-  const displayPnL = isExited ? position.realizedProfit : position.unrealizedPnL;
+  const effectiveRealized = (position.realizedProfit !== undefined && position.realizedProfit !== 0)
+    ? position.realizedProfit
+    : (position.sellAvg && position.buyAvg ? (position.sellAvg - position.buyAvg) * (position.tradeQty || 65) : 0);
+  const isProfit = isExited ? (effectiveRealized >= 0) : (position.unrealizedPnL >= 0);
+  const displayPnL = isExited ? effectiveRealized : position.unrealizedPnL;
   const currentLtp = position.ltp > 0 ? position.ltp : (position.buyAvg || 150);
   const formattedName = formatInstrumentName(position.symbol);
 
@@ -55,7 +60,7 @@ export const PositionCard: React.FC<PositionCardProps> = ({ position, onClose })
 
         <View style={[styles.qtyBadge, isExited ? styles.badgeExited : isLong ? styles.badgeLong : styles.badgeShort]}>
           <Text style={[styles.qtyText, isExited ? styles.textExited : isLong ? styles.textLong : styles.textShort]}>
-            {isExited ? 'EXITED' : `${isLong ? 'LONG' : 'SHORT'} ${position.netQty}`}
+            {isExited ? (position.tradeQty ? `EXITED (${position.tradeQty})` : 'EXITED') : `${isLong ? 'LONG' : 'SHORT'} ${position.netQty}`}
           </Text>
         </View>
       </View>
