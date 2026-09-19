@@ -63,7 +63,7 @@ namespace StoicTrade.Api.Services.Strategies
                         .GroupBy(e => ParseExpiryToDate(e))
                         .Where(g => g.Key.HasValue && g.Key.Value.Date >= today)
                         .OrderBy(g => g.Key!.Value)
-                        .Select(g => g.OrderByDescending(x => x!.Length == 5 && char.IsLetter(x[2])).First()!)
+                        .Select(g => g.OrderByDescending(x => x!.Length == 5 && char.IsLetter(x[2]) && char.IsLetter(x[3])).First()!)
                         .ToList();
 
                     if (!distinctExpiries.Any()) return null;

@@ -332,52 +332,65 @@ namespace StoicTrade.Api.Services.MarketData
 
         /// <summary>
         /// Normalises a Fyers option symbol to extract just the expiry+strike+type part.
-        /// Fyers short_name can be: "NSE:NIFTY26AUG24250CE", "NIFTY26AUG24250CE", or "26AUG24250CE".
-        /// We always want actualExpiry = "26AUG", strike = 24250, type = "CE".
+        /// Fyers short_name can be: "NSE:NIFTY26AUG24250CE", "NSE:NIFTY26O0624500CE", "NIFTY2682824250CE", etc.
+        /// In Fyers / NSE option symbols, the expiry code is ALWAYS exactly 5 characters:
+        /// - Weekly: 2 digits year + 1 char month (1-9, O, N, D) + 2 digits day (01-31), e.g. "26922", "26O06", "26N12", "26D24"
+        /// - Monthly: 2 digits year + 3 letters month, e.g. "26SEP", "26OCT", "26NOV"
+        /// The strike is the remaining trailing digits after the 5-char expiry code.
         /// </summary>
         private static bool TryParseOptionSymbol(string? raw, out string actualExpiry, out int strike, out string type)
         {
             actualExpiry = ""; strike = 0; type = "";
             if (string.IsNullOrEmpty(raw) || raw == "NIFTY50-INDEX") return false;
 
-            // Strip known prefixes so we always work with e.g. "26AUG24250CE" or "2682824250CE"
+            // Strip known prefixes so we always work with e.g. "26AUG24250CE", "26O0624500CE", or "2682824250CE"
             string s = raw;
-            if (s.StartsWith("NSE:NIFTY")) s = s.Substring(9);
-            else if (s.StartsWith("NSE:"))    s = s.Substring(4);
-            if (s.StartsWith("NIFTY"))       s = s.Substring(5);
+            if (s.StartsWith("NSE:BANKNIFTY", StringComparison.OrdinalIgnoreCase)) s = s.Substring(13);
+            else if (s.StartsWith("NSE:NIFTY", StringComparison.OrdinalIgnoreCase)) s = s.Substring(9);
+            else if (s.StartsWith("NSE:", StringComparison.OrdinalIgnoreCase))    s = s.Substring(4);
 
-            if (s.Length < 6) return false;
+            if (s.StartsWith("BANKNIFTY", StringComparison.OrdinalIgnoreCase)) s = s.Substring(9);
+            else if (s.StartsWith("NIFTY", StringComparison.OrdinalIgnoreCase)) s = s.Substring(5);
 
-            type = s.EndsWith("CE") ? "CE" : s.EndsWith("PE") ? "PE" : "";
+            if (s.Length < 7) return false;
+
+            type = s.EndsWith("CE", StringComparison.OrdinalIgnoreCase) ? "CE" : s.EndsWith("PE", StringComparison.OrdinalIgnoreCase) ? "PE" : "";
             if (string.IsNullOrEmpty(type)) return false;
 
             string noSuffix = s.Substring(0, s.Length - 2); // remove CE/PE
 
-            // Count trailing digits → strike
+            // 1. Standard Fyers 5-char expiry prefix (weekly e.g. "26O06", "26922" or monthly e.g. "26OCT", "26SEP")
+            if (noSuffix.Length >= 6)
+            {
+                string exp5 = noSuffix.Substring(0, 5);
+                string strikePart = noSuffix.Substring(5);
+                if (int.TryParse(strikePart, out strike) && strike > 0)
+                {
+                    if (OptionSelectionEngine.ParseExpiryToDate(exp5).HasValue)
+                    {
+                        actualExpiry = exp5;
+                        return true;
+                    }
+                }
+            }
+
+            // 2. Fallback in case of non-standard expiry length: count trailing digits
             int strikeLen = 0;
             for (int i = noSuffix.Length - 1; i >= 0; i--)
             {
                 if (char.IsDigit(noSuffix[i])) strikeLen++;
                 else break;
             }
-            if (strikeLen == 0) return false;
-
-            if (strikeLen == noSuffix.Length)
+            if (strikeLen > 0 && strikeLen < noSuffix.Length)
             {
-                // ── All-digits case: weekly expiry format e.g. "2682824250" ──────────────
-                // Fyers weekly expiry is ALWAYS 5 chars: yy + monthChar(1) + dd(2)
-                // NIFTY strike is always the remaining digits (typically 5 but can be 4-6).
-                // So: first 5 chars = expiry, rest = strike.
-                if (noSuffix.Length < 6) return false; // need at least 5 (expiry) + 1 (strike)
-                actualExpiry = noSuffix.Substring(0, 5);
-                if (!int.TryParse(noSuffix.Substring(5), out strike)) return false;
-                return strike > 0;
+                if (int.TryParse(noSuffix.Substring(noSuffix.Length - strikeLen), out strike) && strike > 0)
+                {
+                    actualExpiry = noSuffix.Substring(0, noSuffix.Length - strikeLen);
+                    return true;
+                }
             }
 
-            // ── Mixed case: monthly expiry like "26AUG24250" ─────────────────────────
-            if (!int.TryParse(noSuffix.Substring(noSuffix.Length - strikeLen), out strike)) return false;
-            actualExpiry = noSuffix.Substring(0, noSuffix.Length - strikeLen);
-            return true;
+            return false;
         }
 
         private static Dictionary<string, Dictionary<int, Dictionary<string, object>>> BuildStrikesMap(JsonDocument fyersDoc)

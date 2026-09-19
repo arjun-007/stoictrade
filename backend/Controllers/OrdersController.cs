@@ -18,34 +18,43 @@ namespace StoicTrade.Api.Controllers
         }
 
         [HttpPost]
-        public async Task<IActionResult> PlaceOrder([FromBody] OrderRequest request, [FromServices] StoicTrade.Api.Data.AppDbContext dbContext)
+        public async Task<IActionResult> PlaceOrder(
+            [FromBody] OrderRequest request,
+            [FromServices] StoicTrade.Api.Data.AppDbContext dbContext,
+            [FromServices] StoicTrade.Api.Services.FyersApiService fyersApi)
         {
-            // By the time this is reached, the RmsMiddleware has already validated:
-            // 1. Kill Switch is NOT active
-            // 2. We are within the trading time window
-            // 3. VIX is within limits
-            // 4. Instrument is valid (NIFTY option or EQ)
-            
-            var settings = await Microsoft.EntityFrameworkCore.EntityFrameworkQueryableExtensions.FirstOrDefaultAsync(dbContext.GlobalSettings);
-            if (settings != null && settings.TradeMode == "Paper")
+            // Normalize order action/side ("BUY" vs "SELL")
+            string side = (!string.IsNullOrWhiteSpace(request.Action) ? request.Action : request.OrderType).Trim().ToUpper();
+            if (side != "BUY" && side != "SELL") side = "BUY";
+
+            var normalisedInstrument = NormaliseSymbol(request.Instrument);
+            if (string.IsNullOrEmpty(normalisedInstrument))
             {
-                var normalisedInstrument = NormaliseSymbol(request.Instrument);
-                var resolver = HttpContext.RequestServices.GetRequiredService<StoicTrade.Api.Services.Strategies.OptionSelectionEngine>();
-                var ltp = resolver.ResolveOptionLtp(normalisedInstrument) ?? 0m;
-                decimal executionPrice = (request.EntryPrice.HasValue && request.EntryPrice.Value > 0)
-                    ? request.EntryPrice.Value
-                    : (ltp > 0 ? ltp : 100m);
-                
+                return BadRequest(new { error = "Invalid instrument symbol provided." });
+            }
+
+            var resolver = HttpContext.RequestServices.GetRequiredService<StoicTrade.Api.Services.Strategies.OptionSelectionEngine>();
+            var ltp = resolver.ResolveOptionLtp(normalisedInstrument) ?? 0m;
+            decimal executionPrice = (request.EntryPrice.HasValue && request.EntryPrice.Value > 0)
+                ? request.EntryPrice.Value
+                : (request.Price.HasValue && request.Price.Value > 0 ? request.Price.Value : (ltp > 0 ? ltp : 100m));
+
+            var settings = await Microsoft.EntityFrameworkCore.EntityFrameworkQueryableExtensions.FirstOrDefaultAsync(dbContext.GlobalSettings);
+            bool isPaper = settings == null || settings.TradeMode == "Paper";
+
+            if (isPaper)
+            {
                 var trade = new StoicTrade.Api.Models.TradeLog
                 {
                     OrderId = Guid.NewGuid().ToString("N").Substring(0, 10).ToUpper(),
                     StrategyName = "Manual",
                     Instrument = normalisedInstrument,
-                    TradeType = request.OrderType,
+                    TradeType = side,
                     Quantity = request.Quantity,
                     ExecutionPrice = executionPrice,
                     Timestamp = DateTime.UtcNow,
-                    Status = "EXECUTED"
+                    Status = "EXECUTED",
+                    Reason = "Manual Paper Order"
                 };
                 
                 dbContext.TradeLogs.Add(trade);
@@ -62,11 +71,10 @@ namespace StoicTrade.Api.Controllers
                 }
                 else
                 {
-                    // Standardize symbol in database if it was legacy/un-normalized
                     position.Symbol = normalisedInstrument;
                 }
 
-                if (request.OrderType == "BUY")
+                if (side == "BUY")
                 {
                     decimal totalVal = ((position.BuyAvg ?? 0m) * position.TotalBuyQty) + (trade.ExecutionPrice * request.Quantity);
                     position.TotalBuyQty += request.Quantity;
@@ -75,8 +83,8 @@ namespace StoicTrade.Api.Controllers
                     position.TotalBuyValue = (position.TotalBuyValue ?? 0m) + (trade.ExecutionPrice * request.Quantity);
                     position.PeakLtp = trade.ExecutionPrice;
                     position.StrategyName = "Manual Entry";
-                    position.TargetPrice = Math.Round(trade.ExecutionPrice * 1.25m, 2);
-                    position.StopLossPrice = Math.Round(Math.Max(5.0m, trade.ExecutionPrice * 0.85m), 2);
+                    position.TargetPrice = request.TargetPrice ?? request.Target ?? Math.Round(trade.ExecutionPrice * 1.25m, 2);
+                    position.StopLossPrice = request.StopLossPrice ?? request.Stoploss ?? Math.Round(Math.Max(5.0m, trade.ExecutionPrice * 0.85m), 2);
                 }
                 else
                 {
@@ -94,7 +102,6 @@ namespace StoicTrade.Api.Controllers
 
                 if (position.NetQty == 0)
                 {
-                    // Reset accumulators for next trade in same symbol
                     position.TotalBuyQty = 0;
                     position.TotalSellQty = 0;
                     position.TotalBuyValue = 0;
@@ -106,14 +113,51 @@ namespace StoicTrade.Api.Controllers
                 }
 
                 position.UpdatedAt = DateTime.UtcNow;
-
                 await dbContext.SaveChangesAsync();
                 
-                return Ok(new { Message = $"[PAPER] Order for {normalisedInstrument} filled at CMP: {trade.ExecutionPrice}" });
+                return Ok(new { Message = $"[PAPER] Order for {normalisedInstrument} filled at CMP: ₹{trade.ExecutionPrice}" });
             }
 
-            // Proceed to place order with Fyers API (mocked for now)
-            return Ok(new { Message = $"[LIVE] Order for {request.Instrument} placed successfully." });
+            // ─── LIVE TRADING ORDER EXECUTION ─────────────────────────────────────
+            string fyersSymbol = normalisedInstrument.StartsWith("NSE:") ? normalisedInstrument : $"NSE:{normalisedInstrument}";
+            string productType = !string.IsNullOrWhiteSpace(request.ProductType) ? request.ProductType : "INTRADAY";
+
+            var (success, brokerResponse, orderId) = await fyersApi.PlaceOrderAsync(
+                fyersSymbol, 
+                side, 
+                request.Quantity, 
+                executionPrice, 
+                productType);
+
+            if (!success)
+            {
+                return BadRequest(new { 
+                    error = brokerResponse,
+                    message = $"Fyers rejected order for {fyersSymbol}: {brokerResponse}" 
+                });
+            }
+
+            // Record live trade in database for local audit and reporting
+            var liveTrade = new StoicTrade.Api.Models.TradeLog
+            {
+                OrderId = !string.IsNullOrEmpty(orderId) ? orderId : Guid.NewGuid().ToString("N").Substring(0, 10).ToUpper(),
+                StrategyName = "Manual",
+                Instrument = normalisedInstrument,
+                TradeType = side,
+                Quantity = request.Quantity,
+                ExecutionPrice = executionPrice,
+                Timestamp = DateTime.UtcNow,
+                Status = "EXECUTED",
+                Reason = $"Live Broker Order ({productType})"
+            };
+            dbContext.TradeLogs.Add(liveTrade);
+            await dbContext.SaveChangesAsync();
+
+            return Ok(new { 
+                Message = $"[LIVE] Order for {fyersSymbol} ({side} {request.Quantity} qty) placed successfully on Fyers.",
+                OrderId = liveTrade.OrderId,
+                BrokerResponse = brokerResponse
+            });
         }
     }
 
@@ -122,6 +166,14 @@ namespace StoicTrade.Api.Controllers
         public string Instrument { get; set; } = string.Empty;
         public int Quantity { get; set; }
         public string OrderType { get; set; } = string.Empty;
+        public string? Action { get; set; }
+        public string? OrderMode { get; set; }
         public decimal? EntryPrice { get; set; }
+        public decimal? Price { get; set; }
+        public decimal? Stoploss { get; set; }
+        public decimal? Target { get; set; }
+        public decimal? StopLossPrice { get; set; }
+        public decimal? TargetPrice { get; set; }
+        public string? ProductType { get; set; }
     }
 }

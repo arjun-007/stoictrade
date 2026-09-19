@@ -168,6 +168,11 @@ namespace StoicTrade.Api.Services
 
         public async Task<JsonElement> GetFundsAsync()
         {
+            if (string.IsNullOrEmpty(_accessToken))
+            {
+                _accessToken = GetAccessToken();
+            }
+
             if (string.IsNullOrEmpty(_accessToken)) return default;
             
             var request = new HttpRequestMessage(HttpMethod.Get, "https://api-t1.fyers.in/api/v3/funds");
@@ -184,6 +189,11 @@ namespace StoicTrade.Api.Services
 
         public async Task<JsonElement> GetPositionsAsync()
         {
+            if (string.IsNullOrEmpty(_accessToken))
+            {
+                _accessToken = GetAccessToken();
+            }
+
             if (string.IsNullOrEmpty(_accessToken)) return default;
             
             var request = new HttpRequestMessage(HttpMethod.Get, "https://api-t1.fyers.in/api/v3/positions");
@@ -200,6 +210,11 @@ namespace StoicTrade.Api.Services
 
         public async Task<JsonElement> GetHoldingsAsync()
         {
+            if (string.IsNullOrEmpty(_accessToken))
+            {
+                _accessToken = GetAccessToken();
+            }
+
             if (string.IsNullOrEmpty(_accessToken)) return default;
             
             var request = new HttpRequestMessage(HttpMethod.Get, "https://api-t1.fyers.in/api/v3/holdings");
@@ -214,7 +229,7 @@ namespace StoicTrade.Api.Services
             return default;
         }
 
-        public async Task PlaceOrderAsync(string instrument, string action, int quantity, decimal expectedPrice)
+        public async Task<(bool Success, string Message, string? OrderId)> PlaceOrderAsync(string instrument, string action, int quantity, decimal expectedPrice, string productType = "INTRADAY")
         {
             string fyersSymbol = instrument.StartsWith("NSE:") ? instrument : $"NSE:{instrument}";
             int side = action.Equals("BUY", StringComparison.OrdinalIgnoreCase) ? 1 : -1;
@@ -224,9 +239,13 @@ namespace StoicTrade.Api.Services
 
             if (string.IsNullOrEmpty(_accessToken))
             {
-                _logger.LogWarning("Fyers API: Order simulated. No active broker access token is available.");
-                await Task.Delay(50);
-                return;
+                _accessToken = GetAccessToken();
+            }
+
+            if (string.IsNullOrEmpty(_accessToken))
+            {
+                _logger.LogWarning("Fyers API: Order rejected. No active broker access token is available.");
+                return (false, "Fyers broker session is not active. Please authenticate Fyers in Settings.", null);
             }
 
             try
@@ -237,7 +256,7 @@ namespace StoicTrade.Api.Services
                     qty = quantity,
                     type = 2, // 2 = Market order
                     side = side, // 1 = Buy, -1 = Sell
-                    productType = "INTRADAY",
+                    productType = string.IsNullOrWhiteSpace(productType) ? "INTRADAY" : productType.ToUpper(),
                     limitPrice = 0,
                     stopPrice = 0,
                     validity = "DAY",
@@ -257,16 +276,29 @@ namespace StoicTrade.Api.Services
                 if (response.IsSuccessStatusCode)
                 {
                     _logger.LogInformation("Fyers API: Order placed successfully for {Symbol}. Response: {Response}", fyersSymbol, content);
+                    string? orderId = null;
+                    try
+                    {
+                        using var doc = JsonDocument.Parse(content);
+                        if (doc.RootElement.TryGetProperty("id", out var idProp))
+                        {
+                            orderId = idProp.GetString();
+                        }
+                    }
+                    catch {}
+                    return (true, content, orderId);
                 }
                 else
                 {
                     _logger.LogError("Fyers API: Order placement failed for {Symbol}. Status: {Status}, Response: {Response}", 
                         fyersSymbol, response.StatusCode, content);
+                    return (false, $"Fyers order failed ({response.StatusCode}): {content}", null);
                 }
             }
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Fyers API: Exception while placing order for {Symbol}", fyersSymbol);
+                return (false, $"Exception placing order with Fyers: {ex.Message}", null);
             }
         }
 
@@ -298,6 +330,11 @@ namespace StoicTrade.Api.Services
 
         public async Task<System.Collections.Generic.List<StoicTrade.Api.Models.Candle>> GetHistoricalCandlesAsync(string symbol, string resolution, DateTime from, DateTime to)
         {
+            if (string.IsNullOrEmpty(_accessToken))
+            {
+                _accessToken = GetAccessToken();
+            }
+
             if (string.IsNullOrEmpty(_accessToken))
             {
                 _logger.LogWarning("Fyers API: Cannot fetch history without access token.");
