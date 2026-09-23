@@ -48,6 +48,7 @@ namespace StoicTrade.Api.Services.Strategies
         private DateTime? _lastSquareOffDate = null;
         private DateTime? _lastDailyResetDate = null;
         private DateTime? _lastStateResetDate = null;
+        private DateTime? _lastAutoStopDate = null;
 
         public StrategyEngineService(
             ILogger<StrategyEngineService> logger,
@@ -122,18 +123,15 @@ namespace StoicTrade.Api.Services.Strategies
                     var globalSettings = dbContext.GlobalSettings.FirstOrDefault();
                     string tradeMode = globalSettings?.TradeMode ?? "Paper";
 
-                    // 3. Daily 3:40 PM IST Auto-Stop Engine (Live mode only)
-                    if (tradeMode == "Live" && (nowIst >= autoStopCutoff || nowIst < marketOpen))
+                    // 3. Daily 3:40 PM IST Auto-Stop Engine (Live mode only, once per day at market close)
+                    if (tradeMode == "Live" && nowIst >= autoStopCutoff && _lastAutoStopDate != todayIst)
                     {
                         if (_fyersApi.IsEngineRunning)
                         {
-                            _logger.LogInformation("Daily 3:40 PM IST market cutoff reached in Live mode. Automatically stopping Strategy Engine and disconnecting broker session.");
-                            _fyersApi.Disconnect();
+                            _logger.LogInformation("Daily 3:40 PM IST market cutoff reached in Live mode. Automatically stopping Strategy Engine for the day.");
+                            _fyersApi.StopEngine();
                         }
-
-                        // Off-market hours in Live mode: sleep with 10s delay to eliminate CPU and hosting costs
-                        await Task.Delay(10000, stoppingToken);
-                        continue;
+                        _lastAutoStopDate = todayIst;
                     }
 
                     // 4. Strict Indian Market Hours Guard: Only evaluate strategies between 09:15 AM and 03:30 PM IST

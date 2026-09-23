@@ -33,7 +33,7 @@ namespace StoicTrade.Api.Controllers
             // If already authenticated with Fyers, start engine directly
             if (!string.IsNullOrEmpty(_fyersApi.GetAccessToken()))
             {
-                _fyersApi.StartPaperEngine();
+                _fyersApi.StartEngine();
                 return Ok(new { Message = "Engine started successfully with live broker market data.", IsRunning = true });
             }
 
@@ -59,8 +59,15 @@ namespace StoicTrade.Api.Controllers
         [HttpPost("stop")]
         public IActionResult StopEngine()
         {
-            _fyersApi.Disconnect();
+            _fyersApi.StopEngine();
             return Ok(new { Message = "Engine stopped successfully.", IsRunning = false });
+        }
+
+        [HttpPost("disconnect")]
+        public IActionResult Disconnect()
+        {
+            _fyersApi.Disconnect();
+            return Ok(new { Message = "Broker session disconnected.", IsRunning = false });
         }
 
         [HttpPost("squareoff")]

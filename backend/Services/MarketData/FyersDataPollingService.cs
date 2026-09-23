@@ -89,13 +89,6 @@ namespace StoicTrade.Api.Services.MarketData
                     
                     delay = isMarketHours ? 2000 : 15000;
 
-                    if (tradeMode == "Live" && !isMarketHours)
-                    {
-                        _logger.LogInformation("Fyers Poller: Off-market hours in Live mode (>= 3:40 PM or < 9:15 AM IST). Disconnecting engine.");
-                        _fyersApi.Disconnect();
-                        await Task.Delay(10000, stoppingToken);
-                        continue;
-                    }
 
                     var token = _fyersApi.GetAccessToken();
 

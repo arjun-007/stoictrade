@@ -144,8 +144,19 @@ namespace StoicTrade.Api.Services
 
         public void StartPaperEngine()
         {
-            _logger.LogInformation("Fyers API: Starting engine in Paper Trading mode...");
+            StartEngine();
+        }
+
+        public void StartEngine()
+        {
+            _logger.LogInformation("Fyers API: Starting Strategy Engine execution...");
             IsEngineRunning = true;
+        }
+
+        public void StopEngine()
+        {
+            _logger.LogInformation("Fyers API: Stopping Strategy Engine execution (session preserved)...");
+            IsEngineRunning = false;
         }
 
         public void Disconnect()
