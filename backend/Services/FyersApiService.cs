@@ -195,6 +195,11 @@ namespace StoicTrade.Api.Services
                 var content = await response.Content.ReadAsStringAsync();
                 return JsonDocument.Parse(content).RootElement;
             }
+            if (response.StatusCode == System.Net.HttpStatusCode.Unauthorized)
+            {
+                _logger.LogWarning("Fyers API: Funds call returned 401 Unauthorized. Clearing expired broker session.");
+                Disconnect();
+            }
             return default;
         }
 
@@ -216,6 +221,11 @@ namespace StoicTrade.Api.Services
                 var content = await response.Content.ReadAsStringAsync();
                 return JsonDocument.Parse(content).RootElement;
             }
+            if (response.StatusCode == System.Net.HttpStatusCode.Unauthorized)
+            {
+                _logger.LogWarning("Fyers API: Positions call returned 401 Unauthorized. Clearing expired broker session.");
+                Disconnect();
+            }
             return default;
         }
 
@@ -236,6 +246,11 @@ namespace StoicTrade.Api.Services
             {
                 var content = await response.Content.ReadAsStringAsync();
                 return JsonDocument.Parse(content).RootElement;
+            }
+            if (response.StatusCode == System.Net.HttpStatusCode.Unauthorized)
+            {
+                _logger.LogWarning("Fyers API: Holdings call returned 401 Unauthorized. Clearing expired broker session.");
+                Disconnect();
             }
             return default;
         }

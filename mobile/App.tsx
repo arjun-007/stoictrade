@@ -19,7 +19,7 @@ import { SettingsScreen } from './screens/SettingsScreen';
 import { LoginScreen } from './screens/LoginScreen';
 import { GlobalPendingApprovalsBanner } from './components/GlobalPendingApprovalsBanner';
 import { setupNotificationChannels, registerForPushNotificationsAsync } from './lib/notifications';
-import { getAuthToken, clearAuthToken } from './lib/auth';
+import { getAuthToken, clearAuthToken, onAuthStateChanged } from './lib/auth';
 
 type TabName = 'dashboard' | 'watchlist' | 'analysis' | 'positions' | 'settings';
 
@@ -32,6 +32,11 @@ export default function App() {
   useEffect(() => {
     setupNotificationChannels();
     registerForPushNotificationsAsync();
+
+    // Listen to real-time auth changes (e.g. 401 token expiry or logout)
+    const unsubscribeAuth = onAuthStateChanged((auth) => {
+      setIsAuthenticated(auth);
+    });
 
     const checkAuth = async () => {
       const token = await getAuthToken();
@@ -62,7 +67,10 @@ export default function App() {
 
     fetchEngineStatus();
     const interval = setInterval(fetchEngineStatus, 3000);
-    return () => clearInterval(interval);
+    return () => {
+      clearInterval(interval);
+      unsubscribeAuth();
+    };
   }, []);
 
   const handleToggleEngine = async () => {
@@ -83,10 +91,18 @@ export default function App() {
           ]
         );
       } else {
-        setIsEngineRunning(!isEngineRunning);
+        const isRunning = res.data.isRunning ?? res.data.IsRunning ?? !isEngineRunning;
+        setIsEngineRunning(isRunning);
+        Alert.alert('Engine Status', `Strategy Engine ${isRunning ? 'Started' : 'Stopped'}`);
       }
     } catch (err: any) {
-      Alert.alert('Error', err.response?.data?.error || 'Failed to toggle engine');
+      const msg =
+        err.response?.data?.error ||
+        err.response?.data?.message ||
+        (err.response?.status === 401 ? 'Session expired. Please log in with your Master PIN.' : null) ||
+        err.message ||
+        'Failed to toggle engine';
+      Alert.alert('Engine Error', msg);
     }
   };
 
@@ -123,7 +139,7 @@ export default function App() {
       case 'positions':
         return <PositionsScreen />;
       case 'settings':
-        return <SettingsScreen />;
+        return <SettingsScreen onLogout={() => clearAuthToken()} />;
     }
   };
 

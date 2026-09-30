@@ -120,11 +120,18 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ onNavigateToTa
           ]
         );
       } else {
-        setIsEngineRunning(!isEngineRunning);
-        Alert.alert('Engine Status', `Strategy Engine ${isEngineRunning ? 'Stopped' : 'Started'}`);
+        const isRunning = res.data.isRunning ?? res.data.IsRunning ?? !isEngineRunning;
+        setIsEngineRunning(isRunning);
+        Alert.alert('Engine Status', `Strategy Engine ${isRunning ? 'Started' : 'Stopped'}`);
       }
     } catch (err: any) {
-      Alert.alert('Engine Error', err.response?.data?.error || 'Failed to toggle engine');
+      const msg =
+        err.response?.data?.error ||
+        err.response?.data?.message ||
+        (err.response?.status === 401 ? 'Session expired. Please log in with your Master PIN.' : null) ||
+        err.message ||
+        'Failed to toggle engine';
+      Alert.alert('Engine Error', msg);
     }
   };
 

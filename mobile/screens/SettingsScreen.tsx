@@ -21,6 +21,7 @@ import {
   Flame,
   Save,
   ShieldCheck,
+  LogOut,
 } from 'lucide-react-native';
 import * as Haptics from 'expo-haptics';
 import { COLORS } from '../lib/theme';
@@ -48,7 +49,11 @@ export interface FullGlobalSettings {
   preventSameStrategyPyramiding: boolean;
 }
 
-export const SettingsScreen: React.FC = () => {
+interface SettingsScreenProps {
+  onLogout?: () => void;
+}
+
+export const SettingsScreen: React.FC<SettingsScreenProps> = ({ onLogout }) => {
   const [settings, setSettings] = useState<FullGlobalSettings>({
     maxLossPerTrade: 1500,
     maxDailyLoss: 3000,
@@ -108,6 +113,26 @@ export const SettingsScreen: React.FC = () => {
     } finally {
       setSaving(false);
     }
+  };
+
+  const handleLogoutConfirm = () => {
+    Alert.alert(
+      'Sign Out StoicTrade',
+      'Are you sure you want to sign out and lock this mobile device session? You will need your Master PIN to log in again.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Sign Out & Lock',
+          style: 'destructive',
+          onPress: async () => {
+            Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
+            if (onLogout) {
+              onLogout();
+            }
+          },
+        },
+      ]
+    );
   };
 
   if (loading) {
@@ -438,6 +463,25 @@ export const SettingsScreen: React.FC = () => {
         )}
       </TouchableOpacity>
 
+      {/* 9. Session & Security */}
+      <View style={[styles.card, { borderColor: 'rgba(239, 68, 68, 0.35)', marginTop: 24 }]}>
+        <View style={styles.cardHeader}>
+          <LogOut size={18} color={COLORS.loss} />
+          <Text style={[styles.cardTitle, { color: COLORS.loss }]}>Session & Security</Text>
+        </View>
+        <Text style={styles.cardDesc}>
+          Sign out of this mobile session and clear cached credentials. You will be prompted to re-enter your Master PIN on next launch.
+        </Text>
+        <TouchableOpacity
+          style={styles.logoutBtn}
+          onPress={handleLogoutConfirm}
+          activeOpacity={0.85}
+        >
+          <LogOut size={16} color="#ffffff" />
+          <Text style={styles.logoutBtnText}>Sign Out & Lock Mobile App</Text>
+        </TouchableOpacity>
+      </View>
+
       <TotpModal visible={showTotpModal} onClose={() => setShowTotpModal(false)} />
     </ScrollView>
   );
@@ -602,5 +646,20 @@ const styles = StyleSheet.create({
     color: COLORS.textMuted,
     lineHeight: 15,
     marginTop: 2,
+  },
+  logoutBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    backgroundColor: COLORS.loss,
+    paddingVertical: 12,
+    borderRadius: 10,
+    marginTop: 4,
+  },
+  logoutBtnText: {
+    fontSize: 14,
+    fontWeight: '800',
+    color: '#ffffff',
   },
 });

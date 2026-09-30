@@ -1,5 +1,5 @@
 import axios from 'axios';
-import { getAuthToken } from './auth';
+import { getAuthToken, clearAuthToken } from './auth';
 
 export const API_BASE_URL = process.env.EXPO_PUBLIC_API_URL || 'https://api.stoictrade.in';
 
@@ -23,9 +23,10 @@ apiClient.interceptors.request.use(async (config) => {
 
 apiClient.interceptors.response.use(
   (response) => response,
-  (error) => {
+  async (error) => {
     if (error.response?.status === 401) {
-      console.warn('API returned 401 Unauthorized');
+      console.warn('API returned 401 Unauthorized - clearing session token');
+      await clearAuthToken();
     }
     return Promise.reject(error);
   }

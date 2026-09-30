@@ -132,6 +132,11 @@ namespace StoicTrade.Api.Services.MarketData
             {
                 var err = await spotRes.Content.ReadAsStringAsync(stoppingToken);
                 _logger.LogWarning("Fyers Poller: Quotes API failed with status {StatusCode}: {Error}. Data polling skipped.", spotRes.StatusCode, err);
+                if (spotRes.StatusCode == System.Net.HttpStatusCode.Unauthorized || spotRes.StatusCode == System.Net.HttpStatusCode.Forbidden)
+                {
+                    _logger.LogWarning("Fyers Poller: Broker session expired (401/403). Clearing invalid token and disconnecting session.");
+                    _fyersApi.Disconnect();
+                }
                 return;
             }
 
