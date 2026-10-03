@@ -40,7 +40,7 @@ namespace StoicTrade.Api.Controllers
                 : (request.Price.HasValue && request.Price.Value > 0 ? request.Price.Value : (ltp > 0 ? ltp : 100m));
 
             var settings = await Microsoft.EntityFrameworkCore.EntityFrameworkQueryableExtensions.FirstOrDefaultAsync(dbContext.GlobalSettings);
-            bool isPaper = settings == null || settings.TradeMode == "Paper";
+            bool isPaper = settings == null || string.Equals(settings.TradeMode, "Paper", StringComparison.OrdinalIgnoreCase);
 
             if (isPaper)
             {
@@ -151,6 +151,65 @@ namespace StoicTrade.Api.Controllers
                 Reason = $"Live Broker Order ({productType})"
             };
             dbContext.TradeLogs.Add(liveTrade);
+
+            // Maintain position tracking ledger so Trailing SL and Targets actively monitor this live position
+            var allPositionsLive = await Microsoft.EntityFrameworkCore.EntityFrameworkQueryableExtensions.ToListAsync(dbContext.PaperPositions);
+            var positionLive = allPositionsLive.FirstOrDefault(p => NormaliseSymbol(p.Symbol) == normalisedInstrument && p.NetQty > 0)
+                ?? allPositionsLive.FirstOrDefault(p => NormaliseSymbol(p.Symbol) == normalisedInstrument);
+
+            if (positionLive == null)
+            {
+                positionLive = new StoicTrade.Api.Models.PaperPosition { Symbol = normalisedInstrument };
+                dbContext.PaperPositions.Add(positionLive);
+            }
+            else
+            {
+                positionLive.Symbol = normalisedInstrument;
+            }
+
+            if (side == "BUY")
+            {
+                decimal totalVal = ((positionLive.BuyAvg ?? 0m) * positionLive.TotalBuyQty) + (executionPrice * request.Quantity);
+                positionLive.TotalBuyQty += request.Quantity;
+                positionLive.BuyAvg = positionLive.TotalBuyQty > 0 ? totalVal / positionLive.TotalBuyQty : executionPrice;
+                positionLive.NetQty += request.Quantity;
+                positionLive.TotalBuyValue = (positionLive.TotalBuyValue ?? 0m) + (executionPrice * request.Quantity);
+                positionLive.PeakLtp = executionPrice;
+                positionLive.StrategyName = "Manual Live";
+                positionLive.TargetPrice = request.TargetPrice ?? request.Target ?? Math.Round(executionPrice * 1.25m, 2);
+                positionLive.StopLossPrice = request.StopLossPrice ?? request.Stoploss ?? Math.Round(Math.Max(5.0m, executionPrice * 0.85m), 2);
+                positionLive.TrailingStopLossPoint = settings?.TrailingStopLossPoint ?? 18.0m;
+                positionLive.TrailingActivationPoint = settings?.TrailingActivationPoint ?? 15.0m;
+                positionLive.IsTrailingActive = false;
+                positionLive.IsPartialBooked = false;
+            }
+            else
+            {
+                decimal totalVal = ((positionLive.SellAvg ?? 0m) * positionLive.TotalSellQty) + (executionPrice * request.Quantity);
+                positionLive.TotalSellQty += request.Quantity;
+                positionLive.SellAvg = positionLive.TotalSellQty > 0 ? totalVal / positionLive.TotalSellQty : executionPrice;
+                positionLive.NetQty -= request.Quantity;
+                positionLive.TotalSellValue = (positionLive.TotalSellValue ?? 0m) + (executionPrice * request.Quantity);
+
+                if (positionLive.NetQty >= 0)
+                {
+                    positionLive.RealizedProfit = (positionLive.RealizedProfit ?? 0m) + (executionPrice - (positionLive.BuyAvg ?? 0m)) * request.Quantity;
+                }
+            }
+
+            if (positionLive.NetQty == 0)
+            {
+                positionLive.TotalBuyQty = 0;
+                positionLive.TotalSellQty = 0;
+                positionLive.TotalBuyValue = 0;
+                positionLive.TotalSellValue = 0;
+                positionLive.BuyAvg = 0;
+                positionLive.SellAvg = 0;
+                positionLive.TargetPrice = null;
+                positionLive.StopLossPrice = null;
+            }
+
+            positionLive.UpdatedAt = DateTime.UtcNow;
             await dbContext.SaveChangesAsync();
 
             return Ok(new { 

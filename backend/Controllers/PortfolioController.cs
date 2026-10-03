@@ -40,7 +40,7 @@ namespace StoicTrade.Api.Controllers
         private bool IsPaperMode()
         {
             var globalSettings = _dbContext.GlobalSettings.FirstOrDefault();
-            return globalSettings != null && globalSettings.TradeMode == "Paper";
+            return globalSettings == null || string.Equals(globalSettings.TradeMode, "Paper", StringComparison.OrdinalIgnoreCase);
         }
 
         /// <summary>
@@ -300,9 +300,47 @@ namespace StoicTrade.Api.Controllers
                 }
 
                 var positions = await _fyersApi.GetPositionsAsync();
-                if (positions.ValueKind != JsonValueKind.Undefined)
+                if (positions.ValueKind != JsonValueKind.Undefined && positions.TryGetProperty("netPositions", out var netPositionsArray))
                 {
-                    return Ok(positions);
+                    var dbPositions = await _dbContext.PaperPositions.ToListAsync();
+                    var enrichedList = new List<Dictionary<string, object?>>();
+
+                    foreach (var p in netPositionsArray.EnumerateArray())
+                    {
+                        var dict = new Dictionary<string, object?>();
+                        foreach (var prop in p.EnumerateObject())
+                        {
+                            dict[prop.Name] = prop.Value.ValueKind switch
+                            {
+                                JsonValueKind.Number => prop.Value.GetDecimal(),
+                                JsonValueKind.String => prop.Value.GetString(),
+                                JsonValueKind.True => true,
+                                JsonValueKind.False => false,
+                                JsonValueKind.Null => null,
+                                _ => prop.Value.ToString()
+                            };
+                        }
+
+                        string symbol = dict.TryGetValue("symbol", out var s) ? s?.ToString() ?? "" : "";
+                        var canonical = NormaliseOptionSymbol(symbol);
+                        var match = dbPositions.FirstOrDefault(db => NormaliseOptionSymbol(db.Symbol) == canonical && db.NetQty > 0)
+                                    ?? dbPositions.FirstOrDefault(db => NormaliseOptionSymbol(db.Symbol) == canonical);
+
+                        if (match != null)
+                        {
+                            dict["targetPrice"] = match.TargetPrice;
+                            dict["stopLossPrice"] = match.StopLossPrice;
+                            dict["trailingStopLossPoint"] = match.TrailingStopLossPoint;
+                            dict["peakLtp"] = match.PeakLtp;
+                            dict["strategyName"] = match.StrategyName;
+                            dict["isPartialBooked"] = match.IsPartialBooked;
+                            dict["isTrailingActive"] = match.IsTrailingActive;
+                        }
+
+                        enrichedList.Add(dict);
+                    }
+
+                    return Ok(new { netPositions = enrichedList });
                 }
                 return Ok(new { netPositions = new List<object>() });
             }

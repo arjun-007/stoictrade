@@ -134,12 +134,21 @@ namespace StoicTrade.Api.Services
                 bias = "BULLISH";
             }
 
-            // If instrument is raw NIFTY or missing option type, resolve optimal ITM contract
+            // If instrument is raw NIFTY or missing option type, resolve optimal ITM contract based on TargetExpiryPreference
             if (signal.Instrument == "NIFTY" || (!signal.Instrument.Contains("CE") && !signal.Instrument.Contains("PE")))
             {
-                var contract = optionEngine.GetOptimalContract("NIFTY", bias, itmDistance: 1, expiryIndex: 2)
-                    ?? optionEngine.GetOptimalContract("NIFTY", bias, itmDistance: 1, expiryIndex: 1)
-                    ?? optionEngine.GetOptimalContract("NIFTY", bias, itmDistance: 0, expiryIndex: 1)
+                int targetExpiryIndex = globalSettings?.TargetExpiryPreference switch
+                {
+                    "CurrentWeek" => 0,
+                    "TwoWeeksOut" => 2,
+                    "Monthly" => 3,
+                    _ => 1 // "NextWeek" by default (e.g. Oct 13)
+                };
+                int fallbackExpiryIndex = targetExpiryIndex == 1 ? 2 : 1;
+
+                var contract = optionEngine.GetOptimalContract("NIFTY", bias, itmDistance: 1, expiryIndex: targetExpiryIndex)
+                    ?? optionEngine.GetOptimalContract("NIFTY", bias, itmDistance: 1, expiryIndex: fallbackExpiryIndex)
+                    ?? optionEngine.GetOptimalContract("NIFTY", bias, itmDistance: 0, expiryIndex: targetExpiryIndex)
                     ?? optionEngine.GetOptimalContract("NIFTY", bias, itmDistance: 1, expiryIndex: 0);
 
                 if (!string.IsNullOrEmpty(contract))
@@ -194,16 +203,23 @@ namespace StoicTrade.Api.Services
             var stratConfig = dbContext.StrategyConfigs.FirstOrDefault(s => s.StrategyName == signal.StrategyName);
             decimal trailingSl = (stratConfig != null && stratConfig.TrailingStopLossPoint > 0) 
                 ? stratConfig.TrailingStopLossPoint 
-                : (globalSettings?.TrailingStopLossPoint ?? 8.0m);
+                : (globalSettings?.TrailingStopLossPoint ?? 18.0m);
+
+            decimal trailingActivation = (stratConfig != null && stratConfig.TrailingActivationPoint > 0)
+                ? stratConfig.TrailingActivationPoint
+                : (globalSettings?.TrailingActivationPoint ?? 15.0m);
 
             position.TotalBuyQty += signal.Quantity;
             position.TotalBuyValue = (position.TotalBuyValue ?? 0m) + (signal.Quantity * executionPrice);
             position.BuyAvg = position.TotalBuyQty > 0 ? (position.TotalBuyValue ?? 0m) / position.TotalBuyQty : executionPrice;
             position.NetQty += signal.Quantity;
             position.PeakLtp = executionPrice;
-            position.TrailingStopLossPoint = trailingSl > 0 ? trailingSl : 8.0m;
-            position.TargetPrice = signal.TargetPrice > 0 ? signal.TargetPrice : Math.Round(executionPrice * 1.25m, 2);
-            position.StopLossPrice = signal.StopLossPrice > 0 ? signal.StopLossPrice : Math.Round(Math.Max(5.0m, executionPrice * 0.85m), 2);
+            position.TrailingStopLossPoint = trailingSl > 0 ? trailingSl : 18.0m;
+            position.TrailingActivationPoint = trailingActivation > 0 ? trailingActivation : 15.0m;
+            position.IsTrailingActive = false;
+            position.IsPartialBooked = false;
+            position.TargetPrice = signal.TargetPrice > 0 ? signal.TargetPrice : Math.Round(executionPrice + Math.Max(35.0m, executionPrice * 0.30m), 2);
+            position.StopLossPrice = signal.StopLossPrice > 0 ? signal.StopLossPrice : Math.Round(Math.Max(5.0m, executionPrice - Math.Max(18.0m, executionPrice * 0.18m)), 2);
             position.UpdatedAt = System.DateTime.UtcNow;
 
             dbContext.TradeLogs.Add(new TradeLog
@@ -241,6 +257,7 @@ namespace StoicTrade.Api.Services
             var openPositions = dbContext.PaperPositions.Where(p => p.NetQty > 0).ToList();
             if (!openPositions.Any()) return;
 
+            bool isPaperMode = globalSettings == null || string.Equals(globalSettings.TradeMode, "Paper", System.StringComparison.OrdinalIgnoreCase);
             bool hasChanges = false;
             foreach (var pos in openPositions)
             {
@@ -248,20 +265,43 @@ namespace StoicTrade.Api.Services
                 if (!ltp.HasValue || ltp.Value <= 0) continue;
                 decimal currentLtp = ltp.Value;
 
-                // 1. Trailing Stop Loss
-                if ((pos.PeakLtp ?? 0m) <= 0) pos.PeakLtp = (pos.BuyAvg ?? 0m) > 0 ? pos.BuyAvg : currentLtp;
-                if (currentLtp > (pos.PeakLtp ?? 0m))
+                decimal activationPts = (pos.TrailingActivationPoint.HasValue && pos.TrailingActivationPoint.Value > 0)
+                    ? pos.TrailingActivationPoint.Value
+                    : (globalSettings?.TrailingActivationPoint ?? 15.0m);
+
+                decimal trailingPts = (pos.TrailingStopLossPoint.HasValue && pos.TrailingStopLossPoint.Value > 0)
+                    ? pos.TrailingStopLossPoint.Value
+                    : (globalSettings?.TrailingStopLossPoint ?? 18.0m);
+
+                decimal buyAvg = (pos.BuyAvg.HasValue && pos.BuyAvg.Value > 0) ? pos.BuyAvg.Value : currentLtp;
+                if ((pos.PeakLtp ?? 0m) <= 0) pos.PeakLtp = buyAvg;
+
+                // 1. Trailing Activation Check: Require meaningful profit buffer (e.g. +15 pts) before trailing activates
+                if (!pos.IsTrailingActive && (currentLtp - buyAvg) >= activationPts)
+                {
+                    pos.IsTrailingActive = true;
+                    hasChanges = true;
+                    // Move hard SL to Breakeven (Cost) immediately
+                    if (buyAvg > (pos.StopLossPrice ?? 0))
+                    {
+                        pos.StopLossPrice = buyAvg;
+                        _logger.LogInformation("MonitorPositions: Trailing ACTIVATED for {Strategy} ({Symbol}). Locked Breakeven at ₹{SL}",
+                            pos.StrategyName, pos.Symbol, pos.StopLossPrice);
+                    }
+                }
+
+                // 2. Trailing Stop Loss: Only trail once activated and price prints a higher high
+                if (pos.IsTrailingActive && currentLtp > (pos.PeakLtp ?? 0m))
                 {
                     pos.PeakLtp = currentLtp;
                     hasChanges = true;
 
-                    decimal trailingPts = (pos.TrailingStopLossPoint.HasValue && pos.TrailingStopLossPoint.Value > 0)
-                        ? pos.TrailingStopLossPoint.Value
-                        : (globalSettings?.TrailingStopLossPoint ?? 8.0m);
-
                     if (trailingPts > 0)
                     {
-                        decimal trailedSl = System.Math.Round((pos.PeakLtp ?? currentLtp) - trailingPts, 2);
+                        decimal peak = pos.PeakLtp ?? currentLtp;
+                        decimal trailedSl = System.Math.Round(peak - trailingPts, 2);
+                        // Once active, trailed SL should never drop below breakeven
+                        trailedSl = System.Math.Max(trailedSl, buyAvg);
                         if (trailedSl > (pos.StopLossPrice ?? 0))
                         {
                             pos.StopLossPrice = trailedSl;
@@ -271,13 +311,63 @@ namespace StoicTrade.Api.Services
                     }
                 }
 
-                // 2. Check Target Hit
+                // 3. Target and Stop Loss evaluations
                 bool isTargetHit = pos.TargetPrice.HasValue && pos.TargetPrice.Value > 0 && currentLtp >= pos.TargetPrice.Value;
-                // 3. Check Stop Loss / Trailing Stop Loss Hit
                 bool isSlHit = pos.StopLossPrice.HasValue && pos.StopLossPrice.Value > 0 && currentLtp <= pos.StopLossPrice.Value;
-                // 4. Check Individual Trade Max Loss Limit
-                decimal currentTradeLoss = ((pos.BuyAvg ?? 0m) - currentLtp) * pos.NetQty;
+                decimal currentTradeLoss = (buyAvg - currentLtp) * pos.NetQty;
                 bool isMaxLossHit = globalSettings != null && globalSettings.MaxLossPerTrade > 0 && currentTradeLoss >= globalSettings.MaxLossPerTrade;
+
+                // 4. Partial Profit Booking: If Target 1 is hit on a multi-lot position (e.g. 2 lots = 130 qty)
+                bool enablePartial = globalSettings == null || globalSettings.EnablePartialProfitBooking;
+                if (isTargetHit && enablePartial && !pos.IsPartialBooked && pos.NetQty > 65)
+                {
+                    int partialQty = (pos.NetQty / 65 / 2) * 65;
+                    if (partialQty == 0) partialQty = pos.NetQty / 2;
+
+                    pos.TotalSellQty += partialQty;
+                    pos.TotalSellValue = (pos.TotalSellValue ?? 0m) + (partialQty * currentLtp);
+                    pos.SellAvg = pos.TotalSellQty > 0 ? (pos.TotalSellValue ?? 0m) / pos.TotalSellQty : currentLtp;
+                    pos.NetQty -= partialQty;
+                    decimal partialPnl = (currentLtp - buyAvg) * partialQty;
+                    pos.RealizedProfit = (pos.RealizedProfit ?? 0m) + partialPnl;
+                    pos.IsPartialBooked = true;
+                    pos.IsTrailingActive = true;
+
+                    // Move Stop Loss to guaranteed profit above Breakeven
+                    pos.StopLossPrice = System.Math.Max(pos.StopLossPrice ?? 0, System.Math.Round(buyAvg + (activationPts * 0.5m), 2));
+                    // Extend Target 2 to allow the runner lot to capture 150-250 point trends
+                    decimal currentTgt = pos.TargetPrice ?? currentLtp;
+                    decimal targetSpan = (currentTgt - buyAvg);
+                    pos.TargetPrice = System.Math.Round(currentTgt + targetSpan, 2);
+                    pos.UpdatedAt = System.DateTime.UtcNow;
+                    hasChanges = true;
+
+                    string partialReason = $"Target 1 Partial Booking (Booked {partialQty} Qty at ₹{currentLtp:F2}, Remaining {pos.NetQty} Qty Trailing to Target 2: ₹{pos.TargetPrice:F2})";
+                    _logger.LogInformation("MonitorPositions: {Reason} for {Strategy} ({Symbol}). Locked Gain: ₹{PnL:F2}",
+                        partialReason, pos.StrategyName, pos.Symbol, partialPnl);
+
+                    dbContext.TradeLogs.Add(new TradeLog
+                    {
+                        OrderId = System.Guid.NewGuid().ToString("N").Substring(0, 10).ToUpper(),
+                        StrategyName = pos.StrategyName ?? "Target 1 Partial Exit",
+                        Instrument = pos.Symbol,
+                        TradeType = "SELL",
+                        Quantity = partialQty,
+                        ExecutionPrice = currentLtp,
+                        Timestamp = System.DateTime.UtcNow,
+                        Status = "EXECUTED",
+                        Reason = partialReason
+                    });
+
+                    // In Live mode, square off the partial lots
+                    if (!isPaperMode && _fyersApiService.IsEngineRunning)
+                    {
+                        var (success, msg, orderId) = await _fyersApiService.PlaceOrderAsync(pos.Symbol, "SELL", partialQty, currentLtp);
+                        _logger.LogInformation("MonitorPositions [LIVE]: Partial profit exit order sent to Fyers for {Symbol} ({Qty} qty): Success={Success}, Msg={Msg}",
+                            pos.Symbol, partialQty, success, msg);
+                    }
+                    continue; // Keep the remaining position active as a runner!
+                }
 
                 if (isTargetHit || isSlHit || isMaxLossHit)
                 {
@@ -327,9 +417,11 @@ namespace StoicTrade.Api.Services
                     );
 
                     // In Live mode, square off via Fyers
-                    if (globalSettings != null && globalSettings.TradeMode == "Live" && _fyersApiService.IsEngineRunning)
+                    if (!isPaperMode && _fyersApiService.IsEngineRunning)
                     {
-                        await _fyersApiService.PlaceOrderAsync(pos.Symbol, "SELL", exitQty, currentLtp);
+                        var (success, msg, orderId) = await _fyersApiService.PlaceOrderAsync(pos.Symbol, "SELL", exitQty, currentLtp);
+                        _logger.LogInformation("MonitorPositions [LIVE]: Full exit order sent to Fyers for {Symbol} ({Qty} qty): Success={Success}, Msg={Msg}",
+                            pos.Symbol, exitQty, success, msg);
                     }
 
                     // Clear Redis lock
@@ -361,7 +453,9 @@ namespace StoicTrade.Api.Services
             var optionEngine = scope.ServiceProvider.GetRequiredService<StoicTrade.Api.Services.Strategies.OptionSelectionEngine>();
             int closedCount = 0;
 
-            if (globalSettings != null && globalSettings.TradeMode == "Paper")
+            bool isPaperMode = globalSettings == null || string.Equals(globalSettings.TradeMode, "Paper", System.StringComparison.OrdinalIgnoreCase);
+
+            if (isPaperMode)
             {
                 var openPositions = dbContext.PaperPositions.Where(p => p.NetQty != 0).ToList();
                 foreach (var pos in openPositions)
@@ -426,7 +520,19 @@ namespace StoicTrade.Api.Services
                 }
                 catch (System.Exception ex)
                 {
-                    _logger.LogError(ex, "AutoSquareOff [LIVE]: Error while closing live positions.");
+                    _logger.LogError(ex, "AutoSquareOff [LIVE]: Error while closing live positions on broker.");
+                }
+
+                // Also synchronize local DB position tracking
+                var localOpenPositions = dbContext.PaperPositions.Where(p => p.NetQty != 0).ToList();
+                foreach (var pos in localOpenPositions)
+                {
+                    pos.NetQty = 0;
+                    pos.UpdatedAt = System.DateTime.UtcNow;
+                }
+                if (localOpenPositions.Any())
+                {
+                    await dbContext.SaveChangesAsync();
                 }
             }
 

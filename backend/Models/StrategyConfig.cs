@@ -20,6 +20,7 @@ namespace StoicTrade.Api.Models
         public decimal PerTradeGainPoint { get; set; }
         public int TimeframeMinutes { get; set; }
         public decimal TrailingStopLossPoint { get; set; }
+        public decimal TrailingActivationPoint { get; set; } = 15.0m;
         
         // Strategy specific parameters (stored as JSON)
         public string AdditionalParamsJson { get; set; } = "{}";

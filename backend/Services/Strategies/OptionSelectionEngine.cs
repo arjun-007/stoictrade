@@ -68,10 +68,23 @@ namespace StoicTrade.Api.Services.Strategies
 
                     if (!distinctExpiries.Any()) return null;
 
-                    // Select the requested expiry (e.g. expiryIndex = 2 for 2 weeks after current week expiry)
-                    string chosenExpiry = (expiryIndex >= 0 && expiryIndex < distinctExpiries.Count)
-                        ? (distinctExpiries[expiryIndex] ?? distinctExpiries.Last() ?? "")
-                        : (distinctExpiries.Count > 1 ? (distinctExpiries.ElementAtOrDefault(1) ?? distinctExpiries.First() ?? "") : (distinctExpiries.First() ?? ""));
+                    // Select the requested expiry (e.g. expiryIndex: 0 = CurrentWeek, 1 = NextWeek e.g. Oct 13, 2 = TwoWeeksOut e.g. Oct 19/20)
+                    string chosenExpiry = "";
+                    if (expiryIndex >= 0 && expiryIndex < distinctExpiries.Count && !string.IsNullOrEmpty(distinctExpiries[expiryIndex]))
+                    {
+                        chosenExpiry = distinctExpiries[expiryIndex]!;
+                    }
+                    else if (distinctExpiries.Count > 1 && !string.IsNullOrEmpty(distinctExpiries[1]))
+                    {
+                        // Fall back to Next Week (Index 1) instead of jumping to monthly
+                        chosenExpiry = distinctExpiries[1]!;
+                    }
+                    else
+                    {
+                        chosenExpiry = distinctExpiries.FirstOrDefault() ?? "";
+                    }
+
+                    if (string.IsNullOrEmpty(chosenExpiry)) return null;
 
                     return $"NSE:{underlyingSymbol}{chosenExpiry}{targetStrike}{optionType}";
                 }

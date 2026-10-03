@@ -42,6 +42,9 @@ export interface FullGlobalSettings {
   autoTradeLots: number;
   baseLotSize: number;
   trailingStopLossPoint: number;
+  trailingActivationPoint?: number;
+  targetExpiryPreference?: string;
+  enablePartialProfitBooking?: boolean;
   maxActivePositions: number;
   maxCapitalPerTrade: number;
   disallowOppositeLegs: boolean;

@@ -19,6 +19,9 @@ namespace StoicTrade.Api.Models
         public decimal? TargetPrice { get; set; }
         public decimal? StopLossPrice { get; set; }
         public decimal? TrailingStopLossPoint { get; set; }
+        public decimal? TrailingActivationPoint { get; set; } = 15.0m;
+        public bool IsTrailingActive { get; set; } = false;
+        public bool IsPartialBooked { get; set; } = false;
         public decimal? PeakLtp { get; set; } = 0m;
         public string? StrategyName { get; set; }
         public DateTime CreatedAt { get; set; } = DateTime.UtcNow;

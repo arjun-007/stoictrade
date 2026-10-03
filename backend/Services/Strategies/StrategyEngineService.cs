@@ -122,9 +122,10 @@ namespace StoicTrade.Api.Services.Strategies
                     var dbContext = scope.ServiceProvider.GetRequiredService<AppDbContext>();
                     var globalSettings = dbContext.GlobalSettings.FirstOrDefault();
                     string tradeMode = globalSettings?.TradeMode ?? "Paper";
+                    bool isPaperMode = string.Equals(tradeMode, "Paper", StringComparison.OrdinalIgnoreCase);
 
                     // 3. Daily 3:40 PM IST Auto-Stop Engine (Live mode only, once per day at market close)
-                    if (tradeMode == "Live" && nowIst >= autoStopCutoff && _lastAutoStopDate != todayIst)
+                    if (!isPaperMode && nowIst >= autoStopCutoff && _lastAutoStopDate != todayIst)
                     {
                         if (_fyersApi.IsEngineRunning)
                         {
@@ -260,12 +261,23 @@ namespace StoicTrade.Api.Services.Strategies
                                     continue;
                                 }
 
-                                // If signal is for NIFTY underlying, select the optimal 2nd weekly ITM option contract
+                                // If signal is for NIFTY underlying, select the optimal ITM option contract based on TargetExpiryPreference
                                 if (signal.Instrument == "NIFTY" || (!signal.Instrument.Contains("CE") && !signal.Instrument.Contains("PE")))
                                 {
                                     string bias = (signal.Action == "BUY") ? "BULLISH" : "BEARISH";
-                                    var contract = optionEngine.GetOptimalContract("NIFTY", bias, itmDistance: 1, expiryIndex: 2)
-                                        ?? optionEngine.GetOptimalContract("NIFTY", bias, itmDistance: 1, expiryIndex: 1);
+                                    int targetExpiryIndex = globalSettings?.TargetExpiryPreference switch
+                                    {
+                                        "CurrentWeek" => 0,
+                                        "TwoWeeksOut" => 2,
+                                        "Monthly" => 3,
+                                        _ => 1 // "NextWeek" by default (e.g. Oct 13)
+                                    };
+                                    int fallbackExpiryIndex = targetExpiryIndex == 1 ? 2 : 1;
+
+                                    var contract = optionEngine.GetOptimalContract("NIFTY", bias, itmDistance: 1, expiryIndex: targetExpiryIndex)
+                                        ?? optionEngine.GetOptimalContract("NIFTY", bias, itmDistance: 1, expiryIndex: fallbackExpiryIndex)
+                                        ?? optionEngine.GetOptimalContract("NIFTY", bias, itmDistance: 1, expiryIndex: 0);
+
                                     if (!string.IsNullOrEmpty(contract))
                                     {
                                         string optSymbol = contract.Replace("NSE:", "");
@@ -277,11 +289,11 @@ namespace StoicTrade.Api.Services.Strategies
                                         // the order action on the option contract is ALWAYS "BUY"
                                         signal.Action = "BUY";
 
-                                        // Set Option Target and Stop Loss prices (~1:2 R:R)
+                                        // Set Option Target and Stop Loss prices with adequate breathing room to capture large trends
                                         decimal targetGainPts = (decimal)config.PerTradeGainPoint;
                                         decimal slLossPts = (decimal)config.PerTradeStopLossPoint;
-                                        decimal optionTargetDelta = targetGainPts > 0 ? (targetGainPts * 0.55m) : (signal.Price * 0.25m);
-                                        decimal optionSlDelta = slLossPts > 0 ? (slLossPts * 0.55m) : (signal.Price * 0.15m);
+                                        decimal optionTargetDelta = targetGainPts > 0 ? Math.Max(35.0m, targetGainPts * 0.55m) : Math.Max(35.0m, signal.Price * 0.30m);
+                                        decimal optionSlDelta = slLossPts > 0 ? Math.Max(18.0m, slLossPts * 0.55m) : Math.Max(18.0m, signal.Price * 0.18m);
 
                                         signal.TargetPrice = Math.Round(signal.Price + optionTargetDelta, 2);
                                         signal.StopLossPrice = Math.Round(Math.Max(5.0m, signal.Price - optionSlDelta), 2);
@@ -389,10 +401,21 @@ namespace StoicTrade.Api.Services.Strategies
                                 Priority = 3 // High priority for multi-strategy consensus
                             };
 
-                            // Resolve option contract
+                            // Resolve option contract based on TargetExpiryPreference
                             string bias = consensusAction == "BUY" ? "BULLISH" : "BEARISH";
-                            var contract = optionEngine.GetOptimalContract("NIFTY", bias, itmDistance: 1, expiryIndex: 2)
-                                ?? optionEngine.GetOptimalContract("NIFTY", bias, itmDistance: 1, expiryIndex: 1);
+                            int groupTargetExpiryIndex = globalSettings?.TargetExpiryPreference switch
+                            {
+                                "CurrentWeek" => 0,
+                                "TwoWeeksOut" => 2,
+                                "Monthly" => 3,
+                                _ => 1 // "NextWeek" by default (e.g. Oct 13)
+                            };
+                            int groupFallbackExpiryIndex = groupTargetExpiryIndex == 1 ? 2 : 1;
+
+                            var contract = optionEngine.GetOptimalContract("NIFTY", bias, itmDistance: 1, expiryIndex: groupTargetExpiryIndex)
+                                ?? optionEngine.GetOptimalContract("NIFTY", bias, itmDistance: 1, expiryIndex: groupFallbackExpiryIndex)
+                                ?? optionEngine.GetOptimalContract("NIFTY", bias, itmDistance: 1, expiryIndex: 0);
+
                             if (!string.IsNullOrEmpty(contract))
                             {
                                 string optSymbol = contract.Replace("NSE:", "");
@@ -405,8 +428,8 @@ namespace StoicTrade.Api.Services.Strategies
 
                                 decimal targetGainPts = group.PerTradeGainPoint;
                                 decimal slLossPts = group.PerTradeStopLossPoint;
-                                decimal optionTargetDelta = targetGainPts > 0 ? (targetGainPts * 0.55m) : (groupSignal.Price * 0.25m);
-                                decimal optionSlDelta = slLossPts > 0 ? (slLossPts * 0.55m) : (groupSignal.Price * 0.15m);
+                                decimal optionTargetDelta = targetGainPts > 0 ? Math.Max(35.0m, targetGainPts * 0.55m) : Math.Max(35.0m, groupSignal.Price * 0.30m);
+                                decimal optionSlDelta = slLossPts > 0 ? Math.Max(18.0m, slLossPts * 0.55m) : Math.Max(18.0m, groupSignal.Price * 0.18m);
 
                                 groupSignal.TargetPrice = Math.Round(groupSignal.Price + optionTargetDelta, 2);
                                 groupSignal.StopLossPrice = Math.Round(Math.Max(5.0m, groupSignal.Price - optionSlDelta), 2);

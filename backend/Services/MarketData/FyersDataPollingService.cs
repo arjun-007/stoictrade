@@ -523,27 +523,35 @@ namespace StoicTrade.Api.Services.MarketData
             var ist = TimeZoneHelper.GetIstTimeZone();
             DateTime today = TimeZoneInfo.ConvertTimeFromUtc(DateTime.UtcNow, ist).Date;
 
-            // ── 1. Weekly expiries for Tuesdays (next 4 Tuesdays) ─────────────
+            // ── 1. Weekly expiries for Tuesdays (next 4 cycles) ─────────────
             int daysUntilTuesday = ((int)DayOfWeek.Tuesday - (int)today.DayOfWeek + 7) % 7;
             for (int i = 0; i < 4; i++)
             {
                 DateTime tues = today.AddDays(daysUntilTuesday + (i * 7));
+                DateTime adjustedWeekly = GetNseAdjustedExpiry(tues);
                 DateTime lastTues = GetLastTuesdayOfMonth(tues);
 
-                int month = tues.Month;
-                string monthChar = month <= 9 ? month.ToString()
-                    : month == 10 ? "O" : month == 11 ? "N" : "D";
+                // Add both adjusted weekly (e.g. 26O19 if Oct 20 is Dussehra holiday) and standard date
+                var targetDates = new HashSet<DateTime> { adjustedWeekly };
+                if (adjustedWeekly != tues) targetDates.Add(tues);
 
-                // If this Tuesday is the last Tuesday of the month, NSE issues a monthly contract
-                // (e.g. "26SEP"). We add both monthly format and numerical weekly format so Fyers quotes match.
-                if (tues.Date == lastTues.Date)
+                foreach (var expDate in targetDates)
                 {
-                    expiries.Add(tues.ToString("yyMMM").ToUpper());
-                    expiries.Add($"{tues:yy}{monthChar}{tues:dd}");
-                }
-                else
-                {
-                    expiries.Add($"{tues:yy}{monthChar}{tues:dd}");
+                    int month = expDate.Month;
+                    string monthChar = month <= 9 ? month.ToString()
+                        : month == 10 ? "O" : month == 11 ? "N" : "D";
+
+                    // If this weekly cycle is the last cycle of the month, NSE issues a monthly contract
+                    // (e.g. "26OCT"). We add monthly format, numerical weekly format, and alphanumeric.
+                    if (tues.Date == lastTues.Date || expDate.Date == lastTues.Date)
+                    {
+                        expiries.Add(expDate.ToString("yyMMM").ToUpper());
+                        expiries.Add($"{expDate:yy}{monthChar}{expDate:dd}");
+                    }
+                    else
+                    {
+                        expiries.Add($"{expDate:yy}{monthChar}{expDate:dd}");
+                    }
                 }
             }
 
@@ -552,8 +560,9 @@ namespace StoicTrade.Api.Services.MarketData
             {
                 var monthStart = new DateTime(today.Year, today.Month, 1).AddMonths(m);
                 DateTime lastTues = GetLastTuesdayOfMonth(monthStart);
+                DateTime adjustedMonthly = GetNseAdjustedExpiry(lastTues);
 
-                string monthlyFmt = lastTues.ToString("yyMMM").ToUpper();
+                string monthlyFmt = adjustedMonthly.ToString("yyMMM").ToUpper();
                 expiries.Add(monthlyFmt);
             }
 
@@ -561,6 +570,45 @@ namespace StoicTrade.Api.Services.MarketData
                 .Distinct()
                 .OrderBy(e => OptionSelectionEngine.ParseExpiryToDate(e) ?? DateTime.MaxValue)
                 .ToList();
+        }
+
+        /// <summary>
+        /// Adjusts an expiry date to the preceding trading day if it falls on an NSE trading holiday or weekend.
+        /// </summary>
+        private static DateTime GetNseAdjustedExpiry(DateTime date)
+        {
+            var d = date;
+            while (d.DayOfWeek == DayOfWeek.Saturday || d.DayOfWeek == DayOfWeek.Sunday || IsKnownNseHoliday(d))
+            {
+                d = d.AddDays(-1);
+            }
+            return d;
+        }
+
+        private static bool IsKnownNseHoliday(DateTime dt)
+        {
+            // Fixed date holidays
+            if (dt.Month == 1 && dt.Day == 26) return true; // Republic Day
+            if (dt.Month == 5 && dt.Day == 1) return true;  // Maharashtra Day
+            if (dt.Month == 8 && dt.Day == 15) return true; // Independence Day
+            if (dt.Month == 10 && dt.Day == 2) return true; // Gandhi Jayanti
+            if (dt.Month == 12 && dt.Day == 25) return true;// Christmas
+
+            // 2026 known floating holidays
+            if (dt.Year == 2026)
+            {
+                if (dt.Month == 2 && dt.Day == 15) return true; // Mahashivratri
+                if (dt.Month == 3 && dt.Day == 4) return true;  // Holi
+                if (dt.Month == 3 && dt.Day == 20) return true; // Id-Ul-Fitr
+                if (dt.Month == 4 && dt.Day == 3) return true;  // Good Friday
+                if (dt.Month == 4 && dt.Day == 14) return true; // Dr. Ambedkar Jayanti
+                if (dt.Month == 5 && dt.Day == 27) return true; // Bakri Id
+                if (dt.Month == 6 && dt.Day == 26) return true; // Muharram
+                if (dt.Month == 10 && dt.Day == 20) return true;// Dussehra (Shifts Oct 20 to Oct 19!)
+                if (dt.Month == 11 && dt.Day == 8) return true; // Diwali-Laxmi Pujan
+                if (dt.Month == 11 && dt.Day == 24) return true;// Gurunanak Jayanti
+            }
+            return false;
         }
 
         /// <summary>Returns the last Tuesday of the month containing <paramref name="anyDayInMonth"/>.</summary>

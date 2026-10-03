@@ -194,6 +194,30 @@ using (var scope = app.Services.CreateScope())
 
     try
     {
+        dbContext.Database.ExecuteSqlRaw("ALTER TABLE GlobalSettings ADD COLUMN TrailingActivationPoint TEXT DEFAULT '15.0'");
+    }
+    catch {}
+
+    try
+    {
+        dbContext.Database.ExecuteSqlRaw("ALTER TABLE GlobalSettings ADD COLUMN TargetExpiryPreference TEXT DEFAULT 'NextWeek'");
+    }
+    catch {}
+
+    try
+    {
+        dbContext.Database.ExecuteSqlRaw("ALTER TABLE GlobalSettings ADD COLUMN EnablePartialProfitBooking INTEGER DEFAULT 1");
+    }
+    catch {}
+
+    try
+    {
+        dbContext.Database.ExecuteSqlRaw("ALTER TABLE StrategyConfigs ADD COLUMN TrailingActivationPoint TEXT DEFAULT '15.0'");
+    }
+    catch {}
+
+    try
+    {
         dbContext.Database.ExecuteSqlRaw(@"
             CREATE TABLE IF NOT EXISTS PaperPositions (
                 Id TEXT PRIMARY KEY,
@@ -209,6 +233,9 @@ using (var scope = app.Services.CreateScope())
                 TargetPrice TEXT,
                 StopLossPrice TEXT,
                 TrailingStopLossPoint TEXT,
+                TrailingActivationPoint TEXT,
+                IsTrailingActive INTEGER DEFAULT 0,
+                IsPartialBooked INTEGER DEFAULT 0,
                 PeakLtp TEXT,
                 StrategyName TEXT,
                 CreatedAt TEXT NOT NULL,
@@ -237,6 +264,24 @@ using (var scope = app.Services.CreateScope())
 
     try
     {
+        dbContext.Database.ExecuteSqlRaw("ALTER TABLE PaperPositions ADD COLUMN TrailingActivationPoint TEXT DEFAULT '15.0'");
+    }
+    catch {}
+
+    try
+    {
+        dbContext.Database.ExecuteSqlRaw("ALTER TABLE PaperPositions ADD COLUMN IsTrailingActive INTEGER DEFAULT 0");
+    }
+    catch {}
+
+    try
+    {
+        dbContext.Database.ExecuteSqlRaw("ALTER TABLE PaperPositions ADD COLUMN IsPartialBooked INTEGER DEFAULT 0");
+    }
+    catch {}
+
+    try
+    {
         dbContext.Database.ExecuteSqlRaw("ALTER TABLE PaperPositions ADD COLUMN PeakLtp TEXT DEFAULT '0'");
     }
     catch {}
@@ -244,6 +289,33 @@ using (var scope = app.Services.CreateScope())
     try
     {
         dbContext.Database.ExecuteSqlRaw("ALTER TABLE PaperPositions ADD COLUMN StrategyName TEXT");
+    }
+    catch {}
+
+    // Auto-widen tight Stop Loss and Trailing SL defaults in existing database so users don't get chopped out on trending days
+    try
+    {
+        dbContext.Database.ExecuteSqlRaw(@"
+            UPDATE GlobalSettings 
+            SET TrailingStopLossPoint = '18.0', PerTradeStopLossPoint = '25.0', PerTradeGainPoint = '50.0', TrailingActivationPoint = '15.0', TargetExpiryPreference = 'NextWeek'
+            WHERE TrailingStopLossPoint = '8.0' OR TrailingStopLossPoint = '8.5' OR TrailingStopLossPoint = '5.0';
+
+            UPDATE StrategyConfigs 
+            SET TrailingStopLossPoint = 18.0, PerTradeStopLossPoint = 25.0, PerTradeGainPoint = 50.0, TrailingActivationPoint = 15.0
+            WHERE StrategyName = 'Supertrend Rider' AND TrailingStopLossPoint <= 8.0;
+
+            UPDATE StrategyConfigs 
+            SET TrailingStopLossPoint = 20.0, PerTradeStopLossPoint = 30.0, PerTradeGainPoint = 60.0, TrailingActivationPoint = 18.0
+            WHERE StrategyName LIKE 'Opening Range Breakout%' AND TrailingStopLossPoint <= 10.0;
+
+            UPDATE StrategyConfigs 
+            SET TrailingStopLossPoint = 15.0, PerTradeStopLossPoint = 20.0, PerTradeGainPoint = 45.0, TrailingActivationPoint = 12.0
+            WHERE StrategyName = 'EMA Pullback' AND TrailingStopLossPoint <= 8.0;
+
+            UPDATE StrategyConfigs 
+            SET TrailingStopLossPoint = 18.0, PerTradeStopLossPoint = 25.0, PerTradeGainPoint = 50.0, TrailingActivationPoint = 15.0
+            WHERE StrategyName LIKE 'Fair Value Gap%' AND TrailingStopLossPoint <= 8.0;
+        ");
     }
     catch {}
 

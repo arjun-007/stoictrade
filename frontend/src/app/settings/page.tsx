@@ -18,6 +18,9 @@ interface GlobalSettings {
   autoTradeLots: number;
   baseLotSize: number;
   trailingStopLossPoint: number;
+  trailingActivationPoint?: number;
+  targetExpiryPreference?: string;
+  enablePartialProfitBooking?: boolean;
   maxActivePositions: number;
   maxCapitalPerTrade: number;
   disallowOppositeLegs: boolean;
@@ -150,12 +153,49 @@ export default function SettingsPage() {
               <label className="block text-sm font-semibold text-slate-700 dark:text-slate-300 mb-2">Global Trailing Stop Loss Point</label>
               <input 
                 type="number" 
-                value={settings.trailingStopLossPoint ?? 8}
+                value={settings.trailingStopLossPoint ?? 18}
                 onChange={e => handleChange('trailingStopLossPoint', Number(e.target.value))}
                 className="w-full px-4 py-3 rounded-xl border border-slate-200 dark:border-slate-700 bg-transparent focus:ring-2 focus:ring-primary outline-none"
               />
-              <p className="text-xs text-slate-500 mt-1">Points to trail stop-loss upward as option LTP rises.</p>
+              <p className="text-xs text-slate-500 mt-1">Points to trail stop-loss upward as option LTP rises (recommended: 15–20 pts).</p>
             </div>
+            <div>
+              <label className="block text-sm font-semibold text-slate-700 dark:text-slate-300 mb-2">Trailing Activation Threshold (Points)</label>
+              <input 
+                type="number" 
+                value={settings.trailingActivationPoint ?? 15}
+                onChange={e => handleChange('trailingActivationPoint', Number(e.target.value))}
+                className="w-full px-4 py-3 rounded-xl border border-slate-200 dark:border-slate-700 bg-transparent focus:ring-2 focus:ring-primary outline-none"
+              />
+              <p className="text-xs text-slate-500 mt-1">Profit needed in points before trailing activates and locks SL at Breakeven (prevents premature stop-out).</p>
+            </div>
+            <div>
+              <label className="block text-sm font-semibold text-slate-700 dark:text-slate-300 mb-2">Target Option Expiry Preference</label>
+              <select
+                value={settings.targetExpiryPreference ?? "NextWeek"}
+                onChange={e => handleChange('targetExpiryPreference', e.target.value)}
+                className="w-full px-4 py-3 rounded-xl border border-slate-200 dark:border-slate-700 bg-surface dark:bg-slate-900 focus:ring-2 focus:ring-primary outline-none"
+              >
+                <option value="NextWeek">Next Week Expiry (Recommended e.g. Oct 13)</option>
+                <option value="TwoWeeksOut">2 Weeks Out Expiry (e.g. Oct 19 / 20)</option>
+                <option value="CurrentWeek">Current Week Expiry (e.g. Oct 6)</option>
+                <option value="Monthly">Monthly Expiry (Last Tuesday of Month)</option>
+              </select>
+              <p className="text-xs text-slate-500 mt-1">Controls which expiry cycle the option engine selects for NIFTY trades.</p>
+            </div>
+          </div>
+
+          <div className="mt-6 p-4 rounded-xl bg-slate-50 dark:bg-slate-900/50 border border-slate-200 dark:border-slate-800 flex items-center justify-between">
+            <div>
+              <div className="font-semibold text-sm text-slate-900 dark:text-white">Partial Profit Booking (Multi-Lot Scaling)</div>
+              <div className="text-xs text-slate-500 mt-0.5">When Target 1 is hit on 2+ lots, books 50% profit and lets the runner lot trail to capture large 150-250 pt trends.</div>
+            </div>
+            <input
+              type="checkbox"
+              checked={settings.enablePartialProfitBooking ?? true}
+              onChange={e => handleChange('enablePartialProfitBooking', e.target.checked)}
+              className="w-5 h-5 rounded text-primary focus:ring-primary cursor-pointer"
+            />
           </div>
         </section>
 

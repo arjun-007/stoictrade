@@ -55,6 +55,9 @@ namespace StoicTrade.Api.Controllers
             settings.AutoTradeLots = updatedSettings.AutoTradeLots > 0 ? updatedSettings.AutoTradeLots : 1;
             settings.BaseLotSize = updatedSettings.BaseLotSize > 0 ? updatedSettings.BaseLotSize : 65;
             settings.TrailingStopLossPoint = updatedSettings.TrailingStopLossPoint;
+            settings.TrailingActivationPoint = updatedSettings.TrailingActivationPoint > 0 ? updatedSettings.TrailingActivationPoint : 15.0m;
+            settings.TargetExpiryPreference = !string.IsNullOrWhiteSpace(updatedSettings.TargetExpiryPreference) ? updatedSettings.TargetExpiryPreference : "NextWeek";
+            settings.EnablePartialProfitBooking = updatedSettings.EnablePartialProfitBooking;
 
             settings.MaxActivePositions = updatedSettings.MaxActivePositions > 0 ? updatedSettings.MaxActivePositions : 1;
             settings.MaxCapitalPerTrade = updatedSettings.MaxCapitalPerTrade > 0 ? updatedSettings.MaxCapitalPerTrade : 200000m;

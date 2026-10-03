@@ -21,7 +21,10 @@ namespace StoicTrade.Api.Models
         public int KillSwitchShutdownMinutes { get; set; } = 720;
         public int AutoTradeLots { get; set; } = 1;
         public int BaseLotSize { get; set; } = 65;
-        public decimal TrailingStopLossPoint { get; set; } = 8.0m;
+        public decimal TrailingStopLossPoint { get; set; } = 18.0m;
+        public decimal TrailingActivationPoint { get; set; } = 15.0m;
+        public string TargetExpiryPreference { get; set; } = "NextWeek"; // "CurrentWeek", "NextWeek", "TwoWeeksOut", "Monthly"
+        public bool EnablePartialProfitBooking { get; set; } = true;
 
         // Concurrency & Risk Guard Rails
         public int MaxActivePositions { get; set; } = 1;
@@ -31,3 +34,4 @@ namespace StoicTrade.Api.Models
         public bool PreventSameStrategyPyramiding { get; set; } = true;
     }
 }
+
