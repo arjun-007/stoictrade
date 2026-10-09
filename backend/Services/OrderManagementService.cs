@@ -92,6 +92,21 @@ namespace StoicTrade.Api.Services
                         Reason = "Strategy Exit Signal"
                     });
 
+                    dbContext.ClosedTrades.Add(new ClosedTrade
+                    {
+                        Symbol = openPosition.Symbol,
+                        StrategyName = openPosition.StrategyName ?? signal.StrategyName,
+                        TradeMode = isPaperMode ? "Paper" : "Live",
+                        EntryTime = openPosition.CreatedAt,
+                        ExitTime = System.DateTime.UtcNow,
+                        BuyPrice = openPosition.BuyAvg ?? 0m,
+                        SellPrice = exitPrice,
+                        Quantity = exitQty,
+                        RealizedProfit = tradePnl,
+                        ExitReason = "Strategy Exit Signal",
+                        DateIst = TimeZoneInfo.ConvertTimeFromUtc(DateTime.SpecifyKind(DateTime.UtcNow, DateTimeKind.Utc), TimeZoneHelper.GetIstTimeZone()).ToString("yyyy-MM-dd")
+                    });
+
                     await dbContext.SaveChangesAsync();
                     _logger.LogInformation("OrderManagementService [{Mode}]: Cleanly exited position for {Strategy} ({Symbol}) at ₹{ExitPrice}. Realized P&L: ₹{PnL:F2}", 
                         isPaperMode ? "PAPER" : "LIVE", openPosition.StrategyName, openPosition.Symbol, exitPrice, openPosition.RealizedProfit);
@@ -400,6 +415,21 @@ namespace StoicTrade.Api.Services
                         Reason = exitReason
                     });
 
+                    dbContext.ClosedTrades.Add(new ClosedTrade
+                    {
+                        Symbol = pos.Symbol,
+                        StrategyName = pos.StrategyName ?? "Target/SL Trigger",
+                        TradeMode = isPaperMode ? "Paper" : "Live",
+                        EntryTime = pos.CreatedAt,
+                        ExitTime = System.DateTime.UtcNow,
+                        BuyPrice = pos.BuyAvg ?? 0m,
+                        SellPrice = currentLtp,
+                        Quantity = exitQty,
+                        RealizedProfit = tradePnl,
+                        ExitReason = exitReason,
+                        DateIst = TimeZoneInfo.ConvertTimeFromUtc(DateTime.SpecifyKind(DateTime.UtcNow, DateTimeKind.Utc), TimeZoneHelper.GetIstTimeZone()).ToString("yyyy-MM-dd")
+                    });
+
                     StoicTrade.Api.Services.Strategies.StrategyEngineService.AddToSignalLog(
                         new StoicTrade.Api.Services.Strategies.SignalLogEntry
                         {
@@ -480,6 +510,21 @@ namespace StoicTrade.Api.Services
                     pos.RealizedProfit = (pos.RealizedProfit ?? 0m) + ((pos.TotalSellValue ?? 0m) - (pos.TotalBuyValue ?? 0m));
                     pos.UpdatedAt = System.DateTime.UtcNow;
                     closedCount++;
+
+                    dbContext.ClosedTrades.Add(new ClosedTrade
+                    {
+                        Symbol = pos.Symbol,
+                        StrategyName = pos.StrategyName ?? "AutoSquareOff",
+                        TradeMode = "Paper",
+                        EntryTime = pos.CreatedAt,
+                        ExitTime = System.DateTime.UtcNow,
+                        BuyPrice = pos.BuyAvg ?? 0m,
+                        SellPrice = exitPrice,
+                        Quantity = exitQty,
+                        RealizedProfit = (exitPrice - (pos.BuyAvg ?? 0m)) * exitQty,
+                        ExitReason = reason,
+                        DateIst = TimeZoneInfo.ConvertTimeFromUtc(DateTime.SpecifyKind(DateTime.UtcNow, DateTimeKind.Utc), TimeZoneHelper.GetIstTimeZone()).ToString("yyyy-MM-dd")
+                    });
 
                     _logger.LogInformation("AutoSquareOff [PAPER]: Closed position {Symbol} at ₹{ExitPrice} (Reason: {Reason})",
                         pos.Symbol, exitPrice, reason);

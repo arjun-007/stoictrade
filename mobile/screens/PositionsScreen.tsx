@@ -1,14 +1,59 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity, RefreshControl, Alert } from 'react-native';
-import { Briefcase, RotateCcw, TrendingUp, AlertCircle, RefreshCw, Trash2 } from 'lucide-react-native';
+import { Briefcase, RotateCcw, TrendingUp, TrendingDown, AlertCircle, RefreshCw, Trash2, Calendar, ChevronDown, ChevronUp, Award, Clock } from 'lucide-react-native';
 import * as Haptics from 'expo-haptics';
 import { COLORS } from '../lib/theme';
 import { apiClient } from '../lib/api';
 import { PositionCard, PositionData } from '../components/PositionCard';
 import MorningConditionBanner from '../components/MorningConditionBanner';
 
-type PositionCategory = 'DAY' | 'HOLDING';
+type PositionCategory = 'DAY' | 'HOLDING' | 'PNL_30D';
 type PositionFilter = 'ALL' | 'ACTIVE' | 'EXITED';
+
+interface DailyPnLRecord {
+  id: number;
+  date: string;
+  realizedPnL: number;
+  unrealizedPnL: number;
+  netPnL: number;
+  totalTrades: number;
+  winningTrades: number;
+  losingTrades: number;
+  tradeMode: string;
+}
+
+interface ClosedTradeItem {
+  id: string;
+  symbol: string;
+  strategyName: string;
+  tradeMode: string;
+  entryTime: string;
+  exitTime: string;
+  buyPrice: number;
+  sellPrice: number;
+  quantity: number;
+  realizedProfit: number;
+  exitReason: string;
+  dateIst: string;
+}
+
+interface PnLHistoryData {
+  daysRequested: number;
+  totalNetPnL: number;
+  totalRealizedPnL: number;
+  totalTrades: number;
+  winningTrades: number;
+  losingTrades: number;
+  winRatePercent: number;
+  profitableDays: number;
+  lossDays: number;
+  breakEvenDays: number;
+  averageDailyPnL: number;
+  bestDay: { date: string; pnl: number } | null;
+  worstDay: { date: string; pnl: number } | null;
+  dailyRecords: DailyPnLRecord[];
+  closedTrades: ClosedTradeItem[];
+}
 
 export const PositionsScreen: React.FC = () => {
   const [positions, setPositions] = useState<PositionData[]>([]);
@@ -16,6 +61,11 @@ export const PositionsScreen: React.FC = () => {
   const [activeCategory, setActiveCategory] = useState<PositionCategory>('DAY');
   const [activeFilter, setActiveFilter] = useState<PositionFilter>('ALL');
   const [refreshing, setRefreshing] = useState(false);
+
+  // 30-Day P&L History State
+  const [pnlData, setPnlData] = useState<PnLHistoryData | null>(null);
+  const [pnlRange, setPnlRange] = useState<number>(30);
+  const [expandedDay, setExpandedDay] = useState<string | null>(null);
 
   const fetchPositions = useCallback(async () => {
     try {
@@ -93,15 +143,32 @@ export const PositionsScreen: React.FC = () => {
     }
   }, []);
 
+  const fetchPnLHistory = useCallback(async () => {
+    try {
+      const res = await apiClient.get(`/api/portfolio/pnl-history?days=${pnlRange}`);
+      if (res.data) {
+        setPnlData(res.data);
+      }
+    } catch (err) {
+      console.error('Error fetching PnL history:', err);
+    }
+  }, [pnlRange]);
+
   useEffect(() => {
     fetchPositions();
     const interval = setInterval(fetchPositions, 3000);
     return () => clearInterval(interval);
   }, [fetchPositions]);
 
+  useEffect(() => {
+    if (activeCategory === 'PNL_30D') {
+      fetchPnLHistory();
+    }
+  }, [activeCategory, pnlRange, fetchPnLHistory]);
+
   const onRefresh = async () => {
     setRefreshing(true);
-    await fetchPositions();
+    await Promise.all([fetchPositions(), fetchPnLHistory()]);
     setRefreshing(false);
   };
 
@@ -263,7 +330,7 @@ export const PositionsScreen: React.FC = () => {
         )}
       </View>
 
-      {/* Category Tabs (DAY vs HOLDING) */}
+      {/* Category Tabs (DAY vs HOLDING vs 30D P&L) */}
       <View style={styles.categoryRow}>
         <TouchableOpacity
           style={[styles.categoryTab, activeCategory === 'DAY' && styles.categoryTabActive]}
@@ -273,7 +340,7 @@ export const PositionsScreen: React.FC = () => {
           }}
         >
           <Text style={[styles.categoryTabText, activeCategory === 'DAY' && styles.categoryTabTextActive]}>
-            Day Positions ({positions.filter((p) => p.category === 'DAY').length})
+            Day ({positions.filter((p) => p.category === 'DAY').length})
           </Text>
         </TouchableOpacity>
 
@@ -288,42 +355,196 @@ export const PositionsScreen: React.FC = () => {
             Holdings ({positions.filter((p) => p.category === 'HOLDING').length})
           </Text>
         </TouchableOpacity>
-      </View>
 
-      {/* Status Filter Chips (ALL, ACTIVE, EXITED) */}
-      <View style={styles.filterRow}>
-        {(['ALL', 'ACTIVE', 'EXITED'] as PositionFilter[]).map((f) => (
-          <TouchableOpacity
-            key={f}
-            style={[styles.filterChip, activeFilter === f && styles.filterChipActive]}
-            onPress={() => {
-              Haptics.selectionAsync();
-              setActiveFilter(f);
-            }}
-          >
-            <Text style={[styles.filterChipText, activeFilter === f && styles.filterChipTextActive]}>
-              {f === 'ALL' ? `All (${positions.filter((p) => p.category === activeCategory).length})` : 
-               f === 'ACTIVE' ? `Active (${activeCount})` : `Exited (${exitedCount})`}
-            </Text>
-          </TouchableOpacity>
-        ))}
-      </View>
-
-      {/* Positions List */}
-      {filteredPositions.length === 0 ? (
-        <View style={styles.emptyCard}>
-          <Briefcase size={32} color={COLORS.textSubtle} />
-          <Text style={styles.emptyTitle}>No {activeFilter.toLowerCase()} positions</Text>
-          <Text style={styles.emptyDesc}>
-            {activeFilter === 'ACTIVE' 
-              ? 'New trades taken by strategy squads or manual orders will appear here' 
-              : 'Positions matching your filters will be listed here'}
+        <TouchableOpacity
+          style={[styles.categoryTab, activeCategory === 'PNL_30D' && styles.categoryTabActive]}
+          onPress={() => {
+            Haptics.selectionAsync();
+            setActiveCategory('PNL_30D');
+            fetchPnLHistory();
+          }}
+        >
+          <Text style={[styles.categoryTabText, activeCategory === 'PNL_30D' && styles.categoryTabTextActive]}>
+            30D P&L
           </Text>
+        </TouchableOpacity>
+      </View>
+
+      {/* ─── 30-DAY P&L ANALYTICS VIEW ─── */}
+      {activeCategory === 'PNL_30D' ? (
+        <View style={styles.pnlContainer}>
+          {/* Range Selector Pills */}
+          <View style={styles.rangeRow}>
+            {[7, 15, 30].map((days) => (
+              <TouchableOpacity
+                key={days}
+                style={[styles.rangePill, pnlRange === days && styles.rangePillActive]}
+                onPress={() => {
+                  Haptics.selectionAsync();
+                  setPnlRange(days);
+                }}
+              >
+                <Text style={[styles.rangePillText, pnlRange === days && styles.rangePillTextActive]}>
+                  {days} Days
+                </Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+
+          {/* 30D Net P&L Summary Card */}
+          <View style={[styles.pnlSummaryCard, (pnlData?.totalNetPnL || 0) >= 0 ? styles.borderProfit : styles.borderLoss]}>
+            <View style={styles.summaryTop}>
+              <Text style={styles.pnlCardTitle}>{pnlRange}-DAY NET P&L</Text>
+              <View style={[styles.badgePill, (pnlData?.totalNetPnL || 0) >= 0 ? styles.badgeProfit : styles.badgeLoss]}>
+                <Text style={[styles.badgeText, (pnlData?.totalNetPnL || 0) >= 0 ? styles.textProfit : styles.textLoss]}>
+                  {(pnlData?.totalNetPnL || 0) >= 0 ? 'PROFITABLE' : 'DRAWDOWN'}
+                </Text>
+              </View>
+            </View>
+
+            <Text style={[styles.pnlTotalAmount, (pnlData?.totalNetPnL || 0) >= 0 ? styles.textProfit : styles.textLoss]}>
+              {(pnlData?.totalNetPnL || 0) >= 0 ? '+' : ''}₹{Math.abs(pnlData?.totalNetPnL || 0).toFixed(2)}
+            </Text>
+
+            <View style={styles.pnlStatsRow}>
+              <View style={styles.pnlStatCol}>
+                <Text style={styles.pnlStatLabel}>Win Rate</Text>
+                <Text style={styles.pnlStatVal}>{pnlData?.winRatePercent || 0}%</Text>
+                <Text style={styles.pnlStatSub}>({pnlData?.winningTrades || 0}W / {pnlData?.losingTrades || 0}L)</Text>
+              </View>
+              <View style={styles.pnlStatCol}>
+                <Text style={styles.pnlStatLabel}>Profitable Days</Text>
+                <Text style={[styles.pnlStatVal, styles.textProfit]}>{pnlData?.profitableDays || 0} Green</Text>
+                <Text style={styles.pnlStatSub}>{pnlData?.lossDays || 0} Red Days</Text>
+              </View>
+              <View style={styles.pnlStatCol}>
+                <Text style={styles.pnlStatLabel}>Avg Daily P&L</Text>
+                <Text style={[styles.pnlStatVal, (pnlData?.averageDailyPnL || 0) >= 0 ? styles.textProfit : styles.textLoss]}>
+                  {(pnlData?.averageDailyPnL || 0) >= 0 ? '+' : ''}₹{(pnlData?.averageDailyPnL || 0).toFixed(0)}
+                </Text>
+                <Text style={styles.pnlStatSub}>{pnlData?.dailyRecords?.length || 0} Sessions</Text>
+              </View>
+            </View>
+          </View>
+
+          {/* Daily Records List */}
+          <View style={styles.historySectionHeader}>
+            <Text style={styles.historySectionTitle}>Daily Performance Journal</Text>
+            <Text style={styles.historySectionSub}>Tap session to view trade tickets</Text>
+          </View>
+
+          {(!pnlData?.dailyRecords || pnlData.dailyRecords.length === 0) ? (
+            <View style={styles.emptyCard}>
+              <Calendar size={28} color={COLORS.textSubtle} />
+              <Text style={styles.emptyTitle}>No P&L history records yet</Text>
+              <Text style={styles.emptyDesc}>Closed trades over the trading session will be recorded here.</Text>
+            </View>
+          ) : (
+            pnlData.dailyRecords.map((item) => {
+              const isItemProfit = item.netPnL >= 0;
+              const isExpanded = expandedDay === item.date;
+              const matchingTrades = pnlData.closedTrades?.filter((t) => t.dateIst === item.date) || [];
+
+              return (
+                <View key={item.id || item.date} style={styles.dailyCard}>
+                  <TouchableOpacity
+                    style={styles.dailyCardHeader}
+                    onPress={() => {
+                      Haptics.selectionAsync();
+                      setExpandedDay(isExpanded ? null : item.date);
+                    }}
+                    activeOpacity={0.7}
+                  >
+                    <View style={styles.dailyDateCol}>
+                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                        <Calendar size={14} color={COLORS.textMuted} />
+                        <Text style={styles.dailyDateText}>{item.date}</Text>
+                      </View>
+                      <Text style={styles.dailyTradesCount}>
+                        {item.totalTrades} trade{item.totalTrades !== 1 ? 's' : ''} ({item.winningTrades}W / {item.losingTrades}L)
+                      </Text>
+                    </View>
+
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+                      <Text style={[styles.dailyPnLText, isItemProfit ? styles.textProfit : styles.textLoss]}>
+                        {isItemProfit ? '+' : ''}₹{Math.abs(item.netPnL).toFixed(2)}
+                      </Text>
+                      {isExpanded ? (
+                        <ChevronUp size={16} color={COLORS.textMuted} />
+                      ) : (
+                        <ChevronDown size={16} color={COLORS.textMuted} />
+                      )}
+                    </View>
+                  </TouchableOpacity>
+
+                  {/* Expanded Closed Trades for this Day */}
+                  {isExpanded && (
+                    <View style={styles.expandedTradeList}>
+                      {matchingTrades.length === 0 ? (
+                        <Text style={styles.noTicketsText}>
+                          Aggregate daily record preserved. No separate intra-session tickets logged.
+                        </Text>
+                      ) : (
+                        matchingTrades.map((t) => (
+                          <View key={t.id} style={styles.tradeTicketRow}>
+                            <View style={{ flex: 1 }}>
+                              <Text style={styles.tradeSymbol}>{t.symbol}</Text>
+                              <Text style={styles.tradeMeta}>
+                                {t.strategyName} • Buy: ₹{t.buyPrice.toFixed(1)} / Sell: ₹{t.sellPrice.toFixed(1)}
+                              </Text>
+                            </View>
+                            <Text style={[styles.tradeTicketPnL, t.realizedProfit >= 0 ? styles.textProfit : styles.textLoss]}>
+                              {t.realizedProfit >= 0 ? '+' : ''}₹{t.realizedProfit.toFixed(2)}
+                            </Text>
+                          </View>
+                        ))
+                      )}
+                    </View>
+                  )}
+                </View>
+              );
+            })
+          )}
         </View>
       ) : (
-        filteredPositions.map((pos, idx) => (
-          <PositionCard key={idx} position={pos} onClose={handleClosePosition} />
-        ))
+        /* ─── ACTIVE POSITIONS / HOLDINGS VIEW ─── */
+        <>
+          {/* Status Filter Chips (ALL, ACTIVE, EXITED) */}
+          <View style={styles.filterRow}>
+            {(['ALL', 'ACTIVE', 'EXITED'] as PositionFilter[]).map((f) => (
+              <TouchableOpacity
+                key={f}
+                style={[styles.filterChip, activeFilter === f && styles.filterChipActive]}
+                onPress={() => {
+                  Haptics.selectionAsync();
+                  setActiveFilter(f);
+                }}
+              >
+                <Text style={[styles.filterChipText, activeFilter === f && styles.filterChipTextActive]}>
+                  {f === 'ALL' ? `All (${positions.filter((p) => p.category === activeCategory).length})` : 
+                   f === 'ACTIVE' ? `Active (${activeCount})` : `Exited (${exitedCount})`}
+                </Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+
+          {/* Positions List */}
+          {filteredPositions.length === 0 ? (
+            <View style={styles.emptyCard}>
+              <Briefcase size={32} color={COLORS.textSubtle} />
+              <Text style={styles.emptyTitle}>No {activeFilter.toLowerCase()} positions</Text>
+              <Text style={styles.emptyDesc}>
+                {activeFilter === 'ACTIVE' 
+                  ? 'New trades taken by strategy squads or manual orders will appear here' 
+                  : 'Positions matching your filters will be listed here'}
+              </Text>
+            </View>
+          ) : (
+            filteredPositions.map((pos, idx) => (
+              <PositionCard key={idx} position={pos} onClose={handleClosePosition} />
+            ))
+          )}
+        </>
       )}
     </ScrollView>
   );
@@ -492,5 +713,182 @@ const styles = StyleSheet.create({
     color: COLORS.textMuted,
     textAlign: 'center',
     marginTop: 4,
+  },
+  // 30D P&L Styles
+  pnlContainer: {
+    marginHorizontal: 16,
+    paddingBottom: 20,
+  },
+  rangeRow: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    gap: 8,
+    marginBottom: 12,
+  },
+  rangePill: {
+    paddingHorizontal: 16,
+    paddingVertical: 6,
+    borderRadius: 8,
+    backgroundColor: COLORS.surface,
+    borderWidth: 1,
+    borderColor: COLORS.surfaceBorder,
+  },
+  rangePillActive: {
+    backgroundColor: COLORS.primary,
+    borderColor: COLORS.primary,
+  },
+  rangePillText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: COLORS.textMuted,
+  },
+  rangePillTextActive: {
+    color: '#ffffff',
+  },
+  pnlSummaryCard: {
+    backgroundColor: COLORS.surface,
+    borderRadius: 16,
+    padding: 18,
+    borderWidth: 1.5,
+    marginBottom: 16,
+  },
+  borderProfit: {
+    borderColor: 'rgba(34, 197, 94, 0.4)',
+  },
+  borderLoss: {
+    borderColor: 'rgba(239, 68, 68, 0.4)',
+  },
+  pnlCardTitle: {
+    fontSize: 11,
+    fontWeight: '800',
+    color: COLORS.textMuted,
+    letterSpacing: 0.5,
+  },
+  badgePill: {
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 6,
+  },
+  badgeProfit: {
+    backgroundColor: 'rgba(34, 197, 94, 0.15)',
+  },
+  badgeLoss: {
+    backgroundColor: 'rgba(239, 68, 68, 0.15)',
+  },
+  badgeText: {
+    fontSize: 10,
+    fontWeight: '800',
+  },
+  pnlTotalAmount: {
+    fontSize: 32,
+    fontWeight: '900',
+    letterSpacing: -0.5,
+    marginVertical: 6,
+  },
+  pnlStatsRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    borderTopWidth: 1,
+    borderTopColor: COLORS.surfaceBorder,
+    paddingTop: 12,
+    marginTop: 6,
+  },
+  pnlStatCol: {
+    alignItems: 'center',
+  },
+  pnlStatLabel: {
+    fontSize: 10,
+    fontWeight: '700',
+    color: COLORS.textMuted,
+    marginBottom: 2,
+  },
+  pnlStatVal: {
+    fontSize: 13,
+    fontWeight: '800',
+    color: COLORS.text,
+  },
+  pnlStatSub: {
+    fontSize: 10,
+    color: COLORS.textMuted,
+    marginTop: 1,
+  },
+  historySectionHeader: {
+    marginBottom: 10,
+  },
+  historySectionTitle: {
+    fontSize: 14,
+    fontWeight: '800',
+    color: COLORS.text,
+  },
+  historySectionSub: {
+    fontSize: 11,
+    color: COLORS.textMuted,
+    marginTop: 1,
+  },
+  dailyCard: {
+    backgroundColor: COLORS.surface,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: COLORS.surfaceBorder,
+    marginBottom: 10,
+    overflow: 'hidden',
+  },
+  dailyCardHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    padding: 14,
+  },
+  dailyDateCol: {
+    gap: 3,
+  },
+  dailyDateText: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: COLORS.text,
+  },
+  dailyTradesCount: {
+    fontSize: 11,
+    color: COLORS.textMuted,
+  },
+  dailyPnLText: {
+    fontSize: 16,
+    fontWeight: '900',
+  },
+  expandedTradeList: {
+    borderTopWidth: 1,
+    borderTopColor: COLORS.surfaceBorder,
+    backgroundColor: 'rgba(0, 0, 0, 0.15)',
+    padding: 12,
+    gap: 10,
+  },
+  noTicketsText: {
+    fontSize: 11,
+    color: COLORS.textMuted,
+    textAlign: 'center',
+    fontStyle: 'italic',
+    paddingVertical: 4,
+  },
+  tradeTicketRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 4,
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(255, 255, 255, 0.05)',
+  },
+  tradeSymbol: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: COLORS.text,
+  },
+  tradeMeta: {
+    fontSize: 10,
+    color: COLORS.textMuted,
+    marginTop: 2,
+  },
+  tradeTicketPnL: {
+    fontSize: 13,
+    fontWeight: '800',
   },
 });

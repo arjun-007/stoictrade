@@ -14,6 +14,8 @@ namespace StoicTrade.Api.Data
         public DbSet<TradeLog> TradeLogs { get; set; }
         public DbSet<GlobalSettings> GlobalSettings { get; set; }
         public DbSet<PaperPosition> PaperPositions { get; set; }
+        public DbSet<DailyPnLRecord> DailyPnLRecords { get; set; }
+        public DbSet<ClosedTrade> ClosedTrades { get; set; }
 
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {

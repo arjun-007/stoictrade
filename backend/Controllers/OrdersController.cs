@@ -102,6 +102,22 @@ namespace StoicTrade.Api.Controllers
 
                 if (position.NetQty == 0)
                 {
+                    decimal exitPnl = (trade.ExecutionPrice - (position.BuyAvg ?? 0m)) * request.Quantity;
+                    dbContext.ClosedTrades.Add(new StoicTrade.Api.Models.ClosedTrade
+                    {
+                        Symbol = normalisedInstrument,
+                        StrategyName = position.StrategyName ?? "Manual Order",
+                        TradeMode = "Paper",
+                        EntryTime = position.CreatedAt,
+                        ExitTime = DateTime.UtcNow,
+                        BuyPrice = position.BuyAvg ?? 0m,
+                        SellPrice = trade.ExecutionPrice,
+                        Quantity = request.Quantity,
+                        RealizedProfit = exitPnl,
+                        ExitReason = "Manual Paper Exit",
+                        DateIst = TimeZoneInfo.ConvertTimeFromUtc(DateTime.SpecifyKind(DateTime.UtcNow, DateTimeKind.Utc), StoicTrade.Api.Services.TimeZoneHelper.GetIstTimeZone()).ToString("yyyy-MM-dd")
+                    });
+
                     position.TotalBuyQty = 0;
                     position.TotalSellQty = 0;
                     position.TotalBuyValue = 0;
@@ -199,6 +215,22 @@ namespace StoicTrade.Api.Controllers
 
             if (positionLive.NetQty == 0)
             {
+                decimal exitPnl = (executionPrice - (positionLive.BuyAvg ?? 0m)) * request.Quantity;
+                dbContext.ClosedTrades.Add(new StoicTrade.Api.Models.ClosedTrade
+                {
+                    Symbol = normalisedInstrument,
+                    StrategyName = positionLive.StrategyName ?? "Manual Live",
+                    TradeMode = "Live",
+                    EntryTime = positionLive.CreatedAt,
+                    ExitTime = DateTime.UtcNow,
+                    BuyPrice = positionLive.BuyAvg ?? 0m,
+                    SellPrice = executionPrice,
+                    Quantity = request.Quantity,
+                    RealizedProfit = exitPnl,
+                    ExitReason = "Manual Live Exit",
+                    DateIst = TimeZoneInfo.ConvertTimeFromUtc(DateTime.SpecifyKind(DateTime.UtcNow, DateTimeKind.Utc), StoicTrade.Api.Services.TimeZoneHelper.GetIstTimeZone()).ToString("yyyy-MM-dd")
+                });
+
                 positionLive.TotalBuyQty = 0;
                 positionLive.TotalSellQty = 0;
                 positionLive.TotalBuyValue = 0;

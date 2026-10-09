@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import Link from "next/link";
 import { ShieldAlert, TrendingUp, TrendingDown, DollarSign, Briefcase, Key } from "lucide-react";
 import { fetchWithAuth } from "@/lib/api";
 
@@ -257,6 +258,12 @@ export default function Dashboard() {
           <p className={`text-3xl font-bold mt-4 ${portfolioSummary.dailyPnL >= 0 ? "text-green-500" : "text-danger"}`}>
             {portfolioSummary.dailyPnL >= 0 ? "+" : ""}₹ {Math.abs(portfolioSummary.dailyPnL || 0).toFixed(2)}
           </p>
+          <div className="mt-4 pt-3 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between text-xs">
+            <span className="text-slate-400">Past 30 Days</span>
+            <Link href="/pnl" className="text-primary hover:underline font-semibold flex items-center gap-1">
+              View Analytics →
+            </Link>
+          </div>
         </div>
         
         <div className="bg-surface p-6 rounded-2xl shadow-sm border border-slate-100 dark:border-slate-800">

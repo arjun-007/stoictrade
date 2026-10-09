@@ -42,14 +42,16 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ onNavigateToTa
   const [pendingApprovals, setPendingApprovals] = useState<PendingSignal[]>([]);
   const [refreshing, setRefreshing] = useState(false);
   const [showTotpModal, setShowTotpModal] = useState(false);
+  const [pnl30Summary, setPnl30Summary] = useState<{ totalNetPnL: number; winRatePercent: number; profitableDays: number } | null>(null);
 
   const fetchDashboardData = useCallback(async () => {
     try {
-      const [summaryRes, statusRes, killRes, approvalsRes] = await Promise.allSettled([
+      const [summaryRes, statusRes, killRes, approvalsRes, pnlRes] = await Promise.allSettled([
         apiClient.get('/api/portfolio/summary'),
         apiClient.get('/api/engine/status'),
         apiClient.get('/api/killswitch/status'),
         apiClient.get('/api/approval/pending'),
+        apiClient.get('/api/portfolio/pnl-history?days=30'),
       ]);
 
       if (summaryRes.status === 'fulfilled') {
@@ -63,6 +65,13 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ onNavigateToTa
       }
       if (approvalsRes.status === 'fulfilled' && Array.isArray(approvalsRes.value.data)) {
         setPendingApprovals(approvalsRes.value.data);
+      }
+      if (pnlRes.status === 'fulfilled' && pnlRes.value.data) {
+        setPnl30Summary({
+          totalNetPnL: pnlRes.value.data.totalNetPnL ?? 0,
+          winRatePercent: pnlRes.value.data.winRatePercent ?? 0,
+          profitableDays: pnlRes.value.data.profitableDays ?? 0,
+        });
       }
     } catch (err) {
       console.error('Error fetching dashboard data:', err);
@@ -248,6 +257,36 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ onNavigateToTa
           variant="neutral"
         />
       </View>
+
+      {/* 30-Day Performance Quick Banner */}
+      {pnl30Summary && (
+        <TouchableOpacity
+          style={styles.pnl30Card}
+          onPress={() => {
+            Haptics.selectionAsync();
+            onNavigateToTab?.('positions');
+          }}
+          activeOpacity={0.8}
+        >
+          <View style={styles.pnl30Inner}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+              <View style={[styles.pnl30IconBox, pnl30Summary.totalNetPnL >= 0 ? styles.pnl30IconProfit : styles.pnl30IconLoss]}>
+                <TrendingUp size={16} color={pnl30Summary.totalNetPnL >= 0 ? COLORS.profit : COLORS.loss} />
+              </View>
+              <View>
+                <Text style={styles.pnl30Label}>PAST 30-DAY PERFORMANCE</Text>
+                <Text style={[styles.pnl30Amount, pnl30Summary.totalNetPnL >= 0 ? styles.textProfit : styles.textLoss]}>
+                  {pnl30Summary.totalNetPnL >= 0 ? '+' : ''}₹{Math.abs(pnl30Summary.totalNetPnL).toFixed(2)}
+                </Text>
+              </View>
+            </View>
+            <View style={{ alignItems: 'flex-end' }}>
+              <Text style={styles.pnl30WinRate}>{pnl30Summary.winRatePercent}% Win Rate</Text>
+              <Text style={styles.pnl30Link}>View Journal →</Text>
+            </View>
+          </View>
+        </TouchableOpacity>
+      )}
 
       {/* Engine & Quick Controls */}
       <View style={styles.controlsCard}>
@@ -477,5 +516,61 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: '800',
     color: COLORS.primary,
+  },
+  // 30D Performance Banner Styles
+  pnl30Card: {
+    backgroundColor: COLORS.surface,
+    borderRadius: 14,
+    padding: 14,
+    marginHorizontal: 16,
+    marginBottom: 10,
+    borderWidth: 1,
+    borderColor: COLORS.surfaceBorder,
+  },
+  pnl30Inner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  pnl30IconBox: {
+    width: 32,
+    height: 32,
+    borderRadius: 8,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  pnl30IconProfit: {
+    backgroundColor: 'rgba(34, 197, 94, 0.15)',
+  },
+  pnl30IconLoss: {
+    backgroundColor: 'rgba(239, 68, 68, 0.15)',
+  },
+  pnl30Label: {
+    fontSize: 10,
+    fontWeight: '800',
+    color: COLORS.textMuted,
+    letterSpacing: 0.5,
+  },
+  pnl30Amount: {
+    fontSize: 16,
+    fontWeight: '900',
+    letterSpacing: -0.3,
+  },
+  pnl30WinRate: {
+    fontSize: 12,
+    fontWeight: '800',
+    color: COLORS.text,
+  },
+  pnl30Link: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: COLORS.primary,
+    marginTop: 2,
+  },
+  textProfit: {
+    color: COLORS.profit,
+  },
+  textLoss: {
+    color: COLORS.loss,
   },
 });
