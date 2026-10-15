@@ -391,58 +391,65 @@ namespace StoicTrade.Api.Controllers
 
         private void EnsureHistoricalSeedData(DateTime todayIst)
         {
-            if (_dbContext.DailyPnLRecords.Count() >= 15) return;
-
-            // Generate realistic baseline trading history for the past 30 days excluding weekends
-            // Realistic intraday option parameters: StoicTrade targets 30 pts (~₹2,250 on 1 lot) and SL 10-15 pts (~₹750 - ₹1,125)
-            var sampleDays = new (int daysAgo, decimal pnl, int totalTrades, int wins, int losses)[]
+            try
             {
-                (1, 2450.0m, 3, 2, 1),
-                (2, 3825.0m, 4, 3, 1),
-                (3, -1125.0m, 2, 0, 2),
-                (4, 1850.0m, 3, 2, 1),
-                (5, 4100.0m, 5, 4, 1),
-                (8, -850.0m, 2, 1, 1),
-                (9, 2900.0m, 3, 2, 1),
-                (10, 5200.0m, 4, 3, 1),
-                (11, 1400.0m, 2, 2, 0),
-                (12, -1450.0m, 3, 1, 2),
-                (15, 3150.0m, 3, 2, 1),
-                (16, 2100.0m, 2, 2, 0),
-                (17, -950.0m, 2, 1, 1),
-                (18, 4600.0m, 4, 3, 1),
-                (19, 1750.0m, 3, 2, 1),
-                (22, 3300.0m, 3, 2, 1),
-                (23, -1200.0m, 2, 0, 2),
-                (24, 2800.0m, 3, 2, 1),
-                (25, 4950.0m, 4, 3, 1),
-                (26, 1600.0m, 2, 1, 1)
-            };
+                if (_dbContext.DailyPnLRecords.Count() >= 15) return;
 
-            foreach (var s in sampleDays)
-            {
-                var dt = todayIst.AddDays(-s.daysAgo);
-                if (dt.DayOfWeek == DayOfWeek.Saturday || dt.DayOfWeek == DayOfWeek.Sunday) continue;
-                string dateStr = dt.ToString("yyyy-MM-dd");
-
-                if (!_dbContext.DailyPnLRecords.Any(r => r.Date == dateStr))
+                // Generate realistic baseline trading history for the past 30 days excluding weekends
+                // Realistic intraday option parameters: StoicTrade targets 30 pts (~₹2,250 on 1 lot) and SL 10-15 pts (~₹750 - ₹1,125)
+                var sampleDays = new (int daysAgo, decimal pnl, int totalTrades, int wins, int losses)[]
                 {
-                    _dbContext.DailyPnLRecords.Add(new StoicTrade.Api.Models.DailyPnLRecord
-                    {
-                        Date = dateStr,
-                        RealizedPnL = s.pnl,
-                        UnrealizedPnL = 0m,
-                        NetPnL = s.pnl,
-                        TotalTrades = s.totalTrades,
-                        WinningTrades = s.wins,
-                        LosingTrades = s.losses,
-                        TradeMode = "Paper",
-                        UpdatedAt = dt
-                    });
-                }
-            }
+                    (1, 2450.0m, 3, 2, 1),
+                    (2, 3825.0m, 4, 3, 1),
+                    (3, -1125.0m, 2, 0, 2),
+                    (4, 1850.0m, 3, 2, 1),
+                    (5, 4100.0m, 5, 4, 1),
+                    (8, -850.0m, 2, 1, 1),
+                    (9, 2900.0m, 3, 2, 1),
+                    (10, 5200.0m, 4, 3, 1),
+                    (11, 1400.0m, 2, 2, 0),
+                    (12, -1450.0m, 3, 1, 2),
+                    (15, 3150.0m, 3, 2, 1),
+                    (16, 2100.0m, 2, 2, 0),
+                    (17, -950.0m, 2, 1, 1),
+                    (18, 4600.0m, 4, 3, 1),
+                    (19, 1750.0m, 3, 2, 1),
+                    (22, 3300.0m, 3, 2, 1),
+                    (23, -1200.0m, 2, 0, 2),
+                    (24, 2800.0m, 3, 2, 1),
+                    (25, 4950.0m, 4, 3, 1),
+                    (26, 1600.0m, 2, 1, 1)
+                };
 
-            try { _dbContext.SaveChanges(); } catch {}
+                foreach (var s in sampleDays)
+                {
+                    var dt = todayIst.AddDays(-s.daysAgo);
+                    if (dt.DayOfWeek == DayOfWeek.Saturday || dt.DayOfWeek == DayOfWeek.Sunday) continue;
+                    string dateStr = dt.ToString("yyyy-MM-dd");
+
+                    if (!_dbContext.DailyPnLRecords.Any(r => r.Date == dateStr))
+                    {
+                        _dbContext.DailyPnLRecords.Add(new StoicTrade.Api.Models.DailyPnLRecord
+                        {
+                            Date = dateStr,
+                            RealizedPnL = s.pnl,
+                            UnrealizedPnL = 0m,
+                            NetPnL = s.pnl,
+                            TotalTrades = s.totalTrades,
+                            WinningTrades = s.wins,
+                            LosingTrades = s.losses,
+                            TradeMode = "Paper",
+                            UpdatedAt = dt
+                        });
+                    }
+                }
+
+                _dbContext.SaveChanges();
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Could not initialize historical seed data for DailyPnLRecords: {Msg}", ex.Message);
+            }
         }
 
         [HttpGet("pnl-history")]

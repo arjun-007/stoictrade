@@ -72,17 +72,49 @@ builder.Services.AddHostedService<StoicTrade.Api.Services.Strategies.StrategyEng
 builder.Services.AddHostedService<StoicTrade.Api.Services.BrokerReconciliationService>();
 
 // Configure CORS for Next.js frontend
-var allowedOrigins = builder.Configuration["AllowedOrigins"]?.Split(',') ?? new[] { "http://localhost:3000", "https://stoictrade-production.up.railway.app", "https://www.stoictrade.in", "https://stoictrade.in" };
+var configuredOrigins = (builder.Configuration["AllowedOrigins"] ?? "")
+    .Split(new[] { ',', ';' }, StringSplitOptions.RemoveEmptyEntries)
+    .Select(o => o.Trim().TrimEnd('/'))
+    .Where(o => !string.IsNullOrEmpty(o))
+    .ToList();
+
+var defaultOrigins = new[]
+{
+    "http://localhost:3000",
+    "http://localhost:3001",
+    "https://stoictrade-production.up.railway.app",
+    "https://www.stoictrade.in",
+    "https://stoictrade.in"
+};
+
+var allowedOrigins = configuredOrigins.Concat(defaultOrigins).Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
 
 builder.Services.AddCors(options =>
 {
     options.AddPolicy("AllowFrontend",
         policy =>
         {
-            policy.WithOrigins(allowedOrigins)
-                  .AllowAnyHeader()
-                  .AllowAnyMethod()
-                  .AllowCredentials();
+            policy.SetIsOriginAllowed(origin =>
+            {
+                if (string.IsNullOrWhiteSpace(origin)) return false;
+                var trimmed = origin.TrimEnd('/');
+                if (allowedOrigins.Any(a => string.Equals(a, trimmed, StringComparison.OrdinalIgnoreCase)))
+                    return true;
+                if (Uri.TryCreate(origin, UriKind.Absolute, out var uri))
+                {
+                    if (uri.Host.Equals("localhost", StringComparison.OrdinalIgnoreCase) ||
+                        uri.Host.Equals("127.0.0.1", StringComparison.OrdinalIgnoreCase) ||
+                        uri.Host.EndsWith("stoictrade.in", StringComparison.OrdinalIgnoreCase) ||
+                        uri.Host.EndsWith("up.railway.app", StringComparison.OrdinalIgnoreCase))
+                    {
+                        return true;
+                    }
+                }
+                return false;
+            })
+            .AllowAnyHeader()
+            .AllowAnyMethod()
+            .AllowCredentials();
         });
 });
 
@@ -97,6 +129,33 @@ if (app.Environment.IsDevelopment())
 
 app.UseHttpsRedirection();
 app.UseCors("AllowFrontend");
+
+// Global exception handling to ensure CORS headers and JSON errors are preserved on 500
+app.Use(async (context, next) =>
+{
+    try
+    {
+        await next();
+    }
+    catch (Exception ex)
+    {
+        var logger = context.RequestServices.GetRequiredService<ILogger<Program>>();
+        logger.LogError(ex, "Unhandled exception on request {Method} {Path}", context.Request.Method, context.Request.Path);
+        if (!context.Response.HasStarted)
+        {
+            context.Response.StatusCode = 500;
+            context.Response.ContentType = "application/json";
+            var errorResponse = new
+            {
+                error = "Internal Server Error",
+                message = ex.Message,
+                path = context.Request.Path.Value
+            };
+            await context.Response.WriteAsync(System.Text.Json.JsonSerializer.Serialize(errorResponse));
+        }
+    }
+});
+
 app.UseAuthentication();
 app.UseAuthorization();
 app.MapControllers();
@@ -106,6 +165,48 @@ using (var scope = app.Services.CreateScope())
 {
     var dbContext = scope.ServiceProvider.GetRequiredService<AppDbContext>();
     dbContext.Database.EnsureCreated(); // Simple approach for now instead of full migrations
+
+    // Ensure DailyPnLRecords table exists
+    try
+    {
+        dbContext.Database.ExecuteSqlRaw(@"
+            CREATE TABLE IF NOT EXISTS DailyPnLRecords (
+                Id INTEGER PRIMARY KEY AUTOINCREMENT,
+                Date TEXT NOT NULL,
+                RealizedPnL TEXT NOT NULL,
+                UnrealizedPnL TEXT NOT NULL,
+                NetPnL TEXT NOT NULL,
+                TotalTrades INTEGER NOT NULL,
+                WinningTrades INTEGER NOT NULL,
+                LosingTrades INTEGER NOT NULL,
+                TradeMode TEXT NOT NULL,
+                UpdatedAt TEXT NOT NULL
+            );
+        ");
+    }
+    catch {}
+
+    // Ensure ClosedTrades table exists
+    try
+    {
+        dbContext.Database.ExecuteSqlRaw(@"
+            CREATE TABLE IF NOT EXISTS ClosedTrades (
+                Id TEXT PRIMARY KEY,
+                Symbol TEXT NOT NULL,
+                StrategyName TEXT NOT NULL,
+                TradeMode TEXT NOT NULL,
+                EntryTime TEXT NOT NULL,
+                ExitTime TEXT NOT NULL,
+                BuyPrice TEXT NOT NULL,
+                SellPrice TEXT NOT NULL,
+                Quantity INTEGER NOT NULL,
+                RealizedProfit TEXT NOT NULL,
+                ExitReason TEXT NOT NULL,
+                DateIst TEXT NOT NULL
+            );
+        ");
+    }
+    catch {}
 
     try 
     {
@@ -132,6 +233,11 @@ using (var scope = app.Services.CreateScope())
         ");
     }
     catch {}
+
+    try { dbContext.Database.ExecuteSqlRaw("ALTER TABLE StrategyGroups ADD COLUMN TrailingStopLossPoint TEXT DEFAULT '8.0'"); } catch {}
+    try { dbContext.Database.ExecuteSqlRaw("ALTER TABLE StrategyGroups ADD COLUMN TimeframeMinutes INTEGER DEFAULT 5"); } catch {}
+    try { dbContext.Database.ExecuteSqlRaw("ALTER TABLE StrategyGroups ADD COLUMN CreatedAt TEXT DEFAULT '2026-01-01T00:00:00'"); } catch {}
+    try { dbContext.Database.ExecuteSqlRaw("ALTER TABLE StrategyGroups ADD COLUMN UpdatedAt TEXT DEFAULT '2026-01-01T00:00:00'"); } catch {}
 
     try
     {

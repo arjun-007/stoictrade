@@ -531,6 +531,20 @@ namespace StoicTrade.Api.Services.Strategies
 
         public static void AddToSignalLog(SignalLogEntry entry)
         {
+            // Deduplicate rapid identical EXIT signals within 30 seconds
+            if (entry.Action == "EXIT")
+            {
+                var lastEntry = RecentSignals.LastOrDefault();
+                if (lastEntry != null && 
+                    lastEntry.Action == "EXIT" && 
+                    lastEntry.StrategyName == entry.StrategyName && 
+                    lastEntry.Instrument == entry.Instrument &&
+                    (entry.GeneratedAt - lastEntry.GeneratedAt).TotalSeconds < 30)
+                {
+                    return;
+                }
+            }
+
             RecentSignals.Enqueue(entry);
             // Trim to last MaxLogSize entries
             while (RecentSignals.Count > MaxLogSize)

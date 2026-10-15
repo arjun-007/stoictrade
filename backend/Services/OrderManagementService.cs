@@ -19,6 +19,23 @@ namespace StoicTrade.Api.Services
             _serviceProvider = serviceProvider;
         }
 
+        private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, System.DateTime> _lastExitSignalTime = new();
+        private static readonly System.TimeSpan ExitSignalCooldown = System.TimeSpan.FromSeconds(60);
+
+        private static bool ShouldEmitExitSignal(string strategy, string symbol)
+        {
+            string key = $"{strategy}_{symbol}";
+            if (_lastExitSignalTime.TryGetValue(key, out var lastTime))
+            {
+                if (System.DateTime.UtcNow - lastTime < ExitSignalCooldown)
+                {
+                    return false;
+                }
+            }
+            _lastExitSignalTime[key] = System.DateTime.UtcNow;
+            return true;
+        }
+
         private static string NormaliseSymbol(string raw)
         {
             if (string.IsNullOrWhiteSpace(raw)) return string.Empty;
@@ -92,20 +109,27 @@ namespace StoicTrade.Api.Services
                         Reason = "Strategy Exit Signal"
                     });
 
-                    dbContext.ClosedTrades.Add(new ClosedTrade
+                    try
                     {
-                        Symbol = openPosition.Symbol,
-                        StrategyName = openPosition.StrategyName ?? signal.StrategyName,
-                        TradeMode = isPaperMode ? "Paper" : "Live",
-                        EntryTime = openPosition.CreatedAt,
-                        ExitTime = System.DateTime.UtcNow,
-                        BuyPrice = openPosition.BuyAvg ?? 0m,
-                        SellPrice = exitPrice,
-                        Quantity = exitQty,
-                        RealizedProfit = tradePnl,
-                        ExitReason = "Strategy Exit Signal",
-                        DateIst = TimeZoneInfo.ConvertTimeFromUtc(DateTime.SpecifyKind(DateTime.UtcNow, DateTimeKind.Utc), TimeZoneHelper.GetIstTimeZone()).ToString("yyyy-MM-dd")
-                    });
+                        dbContext.ClosedTrades.Add(new ClosedTrade
+                        {
+                            Symbol = openPosition.Symbol,
+                            StrategyName = openPosition.StrategyName ?? signal.StrategyName,
+                            TradeMode = isPaperMode ? "Paper" : "Live",
+                            EntryTime = openPosition.CreatedAt,
+                            ExitTime = System.DateTime.UtcNow,
+                            BuyPrice = openPosition.BuyAvg ?? 0m,
+                            SellPrice = exitPrice,
+                            Quantity = exitQty,
+                            RealizedProfit = tradePnl,
+                            ExitReason = "Strategy Exit Signal",
+                            DateIst = TimeZoneInfo.ConvertTimeFromUtc(DateTime.SpecifyKind(DateTime.UtcNow, DateTimeKind.Utc), TimeZoneHelper.GetIstTimeZone()).ToString("yyyy-MM-dd")
+                        });
+                    }
+                    catch (System.Exception ctEx)
+                    {
+                        _logger.LogWarning(ctEx, "ExecuteOrderAsync: Could not save ClosedTrade record.");
+                    }
 
                     await dbContext.SaveChangesAsync();
                     _logger.LogInformation("OrderManagementService [{Mode}]: Cleanly exited position for {Strategy} ({Symbol}) at ₹{ExitPrice}. Realized P&L: ₹{PnL:F2}", 
@@ -274,6 +298,7 @@ namespace StoicTrade.Api.Services
 
             bool isPaperMode = globalSettings == null || string.Equals(globalSettings.TradeMode, "Paper", System.StringComparison.OrdinalIgnoreCase);
             bool hasChanges = false;
+            var pendingExitSignals = new System.Collections.Generic.List<StoicTrade.Api.Services.Strategies.SignalLogEntry>();
             foreach (var pos in openPositions)
             {
                 decimal? ltp = optionEngine.ResolveOptionLtp(pos.Symbol);
@@ -415,22 +440,29 @@ namespace StoicTrade.Api.Services
                         Reason = exitReason
                     });
 
-                    dbContext.ClosedTrades.Add(new ClosedTrade
+                    try
                     {
-                        Symbol = pos.Symbol,
-                        StrategyName = pos.StrategyName ?? "Target/SL Trigger",
-                        TradeMode = isPaperMode ? "Paper" : "Live",
-                        EntryTime = pos.CreatedAt,
-                        ExitTime = System.DateTime.UtcNow,
-                        BuyPrice = pos.BuyAvg ?? 0m,
-                        SellPrice = currentLtp,
-                        Quantity = exitQty,
-                        RealizedProfit = tradePnl,
-                        ExitReason = exitReason,
-                        DateIst = TimeZoneInfo.ConvertTimeFromUtc(DateTime.SpecifyKind(DateTime.UtcNow, DateTimeKind.Utc), TimeZoneHelper.GetIstTimeZone()).ToString("yyyy-MM-dd")
-                    });
+                        dbContext.ClosedTrades.Add(new ClosedTrade
+                        {
+                            Symbol = pos.Symbol,
+                            StrategyName = pos.StrategyName ?? "Target/SL Trigger",
+                            TradeMode = isPaperMode ? "Paper" : "Live",
+                            EntryTime = pos.CreatedAt,
+                            ExitTime = System.DateTime.UtcNow,
+                            BuyPrice = pos.BuyAvg ?? 0m,
+                            SellPrice = currentLtp,
+                            Quantity = exitQty,
+                            RealizedProfit = tradePnl,
+                            ExitReason = exitReason,
+                            DateIst = TimeZoneInfo.ConvertTimeFromUtc(DateTime.SpecifyKind(DateTime.UtcNow, DateTimeKind.Utc), TimeZoneHelper.GetIstTimeZone()).ToString("yyyy-MM-dd")
+                        });
+                    }
+                    catch (System.Exception ctEx)
+                    {
+                        _logger.LogWarning(ctEx, "MonitorPositions: Failed to record closed trade into ClosedTrades table.");
+                    }
 
-                    StoicTrade.Api.Services.Strategies.StrategyEngineService.AddToSignalLog(
+                    pendingExitSignals.Add(
                         new StoicTrade.Api.Services.Strategies.SignalLogEntry
                         {
                             StrategyName = pos.StrategyName ?? "Strategy",
@@ -471,7 +503,23 @@ namespace StoicTrade.Api.Services
 
             if (hasChanges)
             {
-                await dbContext.SaveChangesAsync();
+                try
+                {
+                    await dbContext.SaveChangesAsync();
+
+                    // Only emit to Live Signal Log after DB save succeeds and debounce duplicate exit signals
+                    foreach (var exitSignal in pendingExitSignals)
+                    {
+                        if (ShouldEmitExitSignal(exitSignal.StrategyName, exitSignal.Instrument))
+                        {
+                            StoicTrade.Api.Services.Strategies.StrategyEngineService.AddToSignalLog(exitSignal);
+                        }
+                    }
+                }
+                catch (System.Exception ex)
+                {
+                    _logger.LogError(ex, "MonitorPositions: Failed to save position state changes to database.");
+                }
             }
         }
 
@@ -511,20 +559,27 @@ namespace StoicTrade.Api.Services
                     pos.UpdatedAt = System.DateTime.UtcNow;
                     closedCount++;
 
-                    dbContext.ClosedTrades.Add(new ClosedTrade
+                    try
                     {
-                        Symbol = pos.Symbol,
-                        StrategyName = pos.StrategyName ?? "AutoSquareOff",
-                        TradeMode = "Paper",
-                        EntryTime = pos.CreatedAt,
-                        ExitTime = System.DateTime.UtcNow,
-                        BuyPrice = pos.BuyAvg ?? 0m,
-                        SellPrice = exitPrice,
-                        Quantity = exitQty,
-                        RealizedProfit = (exitPrice - (pos.BuyAvg ?? 0m)) * exitQty,
-                        ExitReason = reason,
-                        DateIst = TimeZoneInfo.ConvertTimeFromUtc(DateTime.SpecifyKind(DateTime.UtcNow, DateTimeKind.Utc), TimeZoneHelper.GetIstTimeZone()).ToString("yyyy-MM-dd")
-                    });
+                        dbContext.ClosedTrades.Add(new ClosedTrade
+                        {
+                            Symbol = pos.Symbol,
+                            StrategyName = pos.StrategyName ?? "AutoSquareOff",
+                            TradeMode = "Paper",
+                            EntryTime = pos.CreatedAt,
+                            ExitTime = System.DateTime.UtcNow,
+                            BuyPrice = pos.BuyAvg ?? 0m,
+                            SellPrice = exitPrice,
+                            Quantity = exitQty,
+                            RealizedProfit = (exitPrice - (pos.BuyAvg ?? 0m)) * exitQty,
+                            ExitReason = reason,
+                            DateIst = TimeZoneInfo.ConvertTimeFromUtc(DateTime.SpecifyKind(DateTime.UtcNow, DateTimeKind.Utc), TimeZoneHelper.GetIstTimeZone()).ToString("yyyy-MM-dd")
+                        });
+                    }
+                    catch (System.Exception ctEx)
+                    {
+                        _logger.LogWarning(ctEx, "AutoSquareOff: Failed to record closed trade into ClosedTrades table.");
+                    }
 
                     _logger.LogInformation("AutoSquareOff [PAPER]: Closed position {Symbol} at ₹{ExitPrice} (Reason: {Reason})",
                         pos.Symbol, exitPrice, reason);
