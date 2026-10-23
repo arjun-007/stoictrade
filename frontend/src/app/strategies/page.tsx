@@ -12,6 +12,7 @@ interface StrategyConfig {
   perTradeGainPoint: number;
   timeframeMinutes: number;
   trailingStopLossPoint: number;
+  trailingActivationPoint?: number;
   operatingMode: string;
   additionalParamsJson: string; // JSON string from backend
 }
@@ -19,16 +20,24 @@ interface StrategyConfig {
 export default function StrategiesPage() {
   const [strategies, setStrategies] = useState<StrategyConfig[]>([]);
   const [loading, setLoading] = useState(true);
+  const [savingId, setSavingId] = useState<number | null>(null);
+  const [togglingId, setTogglingId] = useState<number | null>(null);
+  const [savedSuccessId, setSavedSuccessId] = useState<number | null>(null);
+  const [errorStatus, setErrorStatus] = useState<string | null>(null);
 
   useEffect(() => {
     fetchWithAuth("/api/strategyconfig")
-      .then(res => res.json())
+      .then(res => {
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        return res.json();
+      })
       .then(data => {
         setStrategies(data);
         setLoading(false);
       })
       .catch(err => {
         console.error(err);
+        setErrorStatus("Failed to load strategy configurations. Please verify backend connection.");
         setLoading(false);
       });
   }, []);
@@ -37,17 +46,33 @@ export default function StrategiesPage() {
     const strategy = strategies.find(s => s.id === id);
     if (!strategy) return;
     
-    const updated = { ...strategy, isEnabled: !strategy.isEnabled };
+    setTogglingId(id);
+    const prevEnabled = strategy.isEnabled;
+    const updated = { ...strategy, isEnabled: !prevEnabled };
     setStrategies(strategies.map(s => s.id === id ? updated : s));
 
     try {
-      await fetchWithAuth(`/api/strategyconfig/${id}`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(updated)
+      const res = await fetchWithAuth(`/api/strategyconfig/${id}/toggle`, {
+        method: "POST"
       });
-    } catch (err) {
-      console.error(err);
+      if (!res.ok) {
+        // Fallback to PUT if toggle endpoint returns non-OK
+        const putRes = await fetchWithAuth(`/api/strategyconfig/${id}`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(updated)
+        });
+        if (!putRes.ok) {
+          throw new Error(`Server returned ${putRes.status}`);
+        }
+      }
+    } catch (err: any) {
+      console.error("Toggle strategy failed", err);
+      // Revert optimistic update
+      setStrategies(strategies.map(s => s.id === id ? { ...s, isEnabled: prevEnabled } : s));
+      alert(`Failed to toggle strategy: ${err?.message || "Please check backend connection."}`);
+    } finally {
+      setTogglingId(null);
     }
   };
 
@@ -78,15 +103,29 @@ export default function StrategiesPage() {
   const saveConfig = async (id: number) => {
     const strategy = strategies.find(s => s.id === id);
     if (!strategy) return;
+    setSavingId(id);
+    setErrorStatus(null);
     try {
-      await fetchWithAuth(`/api/strategyconfig/${id}`, {
+      const res = await fetchWithAuth(`/api/strategyconfig/${id}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(strategy)
       });
-      alert(`Config for ${strategy.strategyName} saved!`);
-    } catch (err) {
-      console.error(err);
+      if (res.ok) {
+        setSavedSuccessId(id);
+        setTimeout(() => setSavedSuccessId(null), 3500);
+      } else {
+        const errorData = await res.json().catch(() => ({}));
+        const msg = errorData.error || `HTTP ${res.status}: ${res.statusText}`;
+        setErrorStatus(`Failed to save ${strategy.strategyName}: ${msg}`);
+        alert(`Failed to save ${strategy.strategyName}: ${msg}`);
+      }
+    } catch (err: any) {
+      console.error("Failed to save config", err);
+      setErrorStatus(`Error saving ${strategy.strategyName}: ${err.message || err}`);
+      alert(`Error saving ${strategy.strategyName}: ${err.message || err}`);
+    } finally {
+      setSavingId(null);
     }
   };
 
@@ -297,7 +336,7 @@ export default function StrategiesPage() {
                 </select>
               </div>
 
-              <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-2">
+              <div className="grid grid-cols-2 md:grid-cols-5 gap-3 mb-2">
                 <div>
                   <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1">Time (Min)</label>
                   <input 
@@ -334,6 +373,15 @@ export default function StrategiesPage() {
                     className="w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-transparent focus:ring-2 focus:ring-primary outline-none"
                   />
                 </div>
+                <div>
+                  <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1">Trail Trigger</label>
+                  <input 
+                    type="number" 
+                    value={strategy.trailingActivationPoint ?? 15}
+                    onChange={e => updateParam(strategy.id, 'trailingActivationPoint', Number(e.target.value))}
+                    className="w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-transparent focus:ring-2 focus:ring-primary outline-none"
+                  />
+                </div>
               </div>
               
               {/* Dynamic Algorithm-Specific Parameters */}
@@ -343,10 +391,21 @@ export default function StrategiesPage() {
 
             <button 
               onClick={() => saveConfig(strategy.id)}
-              className="w-full mt-6 flex items-center justify-center gap-2 py-3 border border-primary text-primary hover:bg-primary/5 rounded-lg font-bold transition-colors"
+              disabled={savingId === strategy.id}
+              className={`w-full mt-6 flex items-center justify-center gap-2 py-3 rounded-lg font-bold transition-all ${
+                savedSuccessId === strategy.id
+                  ? "bg-emerald-500 text-white border border-emerald-600 shadow-md"
+                  : savingId === strategy.id
+                  ? "bg-primary/20 text-primary border border-primary/40 cursor-not-allowed"
+                  : "border border-primary text-primary hover:bg-primary/5 shadow-sm"
+              }`}
             >
-              <Save className="w-4 h-4" />
-              Save Configuration
+              <Save className={`w-4 h-4 ${savingId === strategy.id ? "animate-spin" : ""}`} />
+              {savedSuccessId === strategy.id 
+                ? "Changes Saved Successfully!" 
+                : savingId === strategy.id 
+                ? "Saving..." 
+                : "Save Configuration"}
             </button>
           </div>
         ))}

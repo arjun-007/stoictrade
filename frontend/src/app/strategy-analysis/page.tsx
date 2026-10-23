@@ -109,7 +109,9 @@ export default function StrategyAnalysisPage() {
   const [strategies, setStrategies]         = useState<StrategyConfig[]>([]);
   const [allStrategies, setAllStrategies]   = useState<StrategyConfig[]>([]);
   const [strategyGroups, setStrategyGroups] = useState<StrategyGroup[]>([]);
-  const [activeTab, setActiveTab]           = useState<"groups" | "strategies">("groups");
+  const [activeTab, setActiveTab]           = useState<"groups" | "strategies">("strategies");
+  const [strategyFilter, setStrategyFilter] = useState<"all" | "active">("all");
+  const [togglingStrategyId, setTogglingStrategyId] = useState<number | null>(null);
   
   const [signalLog, setSignalLog]           = useState<SignalLogEntry[]>([]);
   const [pending, setPending]               = useState<PendingApproval[]>([]);
@@ -134,7 +136,7 @@ export default function StrategyAnalysisPage() {
       if (stratsRes.ok) {
         const data: StrategyConfig[] = await stratsRes.json();
         setAllStrategies(data);
-        setStrategies(data.filter(s => s.isEnabled));
+        setStrategies(data);
       }
 
       if (groupsRes.ok) {
@@ -246,6 +248,24 @@ export default function StrategyAnalysisPage() {
       console.error("Failed to clear signals", err);
     } finally {
       setClearingLog(false);
+    }
+  };
+
+  const handleToggleStrategy = async (id: number) => {
+    setTogglingStrategyId(id);
+    try {
+      const res = await fetchWithAuth(`/api/strategyconfig/${id}/toggle`, { method: "POST" });
+      if (res.ok) {
+        setAllStrategies(prev => prev.map(s => s.id === id ? { ...s, isEnabled: !s.isEnabled } : s));
+        setStrategies(prev => prev.map(s => s.id === id ? { ...s, isEnabled: !s.isEnabled } : s));
+      } else {
+        alert("Failed to toggle strategy. Check backend connection.");
+      }
+    } catch (err) {
+      console.error("Failed to toggle strategy", err);
+      alert("Error communicating with backend.");
+    } finally {
+      setTogglingStrategyId(null);
     }
   };
 
@@ -487,70 +507,142 @@ export default function StrategyAnalysisPage() {
 
       {/* ── Individual Strategies Grid ── */}
       {activeTab === "strategies" && (
-        strategies.length === 0 ? (
-          <div className="flex flex-col items-center justify-center h-56 bg-surface rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm p-6 text-center">
-            <BarChart2 className="w-12 h-12 text-slate-300 dark:text-slate-700 mb-3" />
-            <p className="text-lg font-bold text-slate-700 dark:text-slate-300">No standalone active strategies</p>
-            <p className="text-xs text-slate-500 mt-1">Go to the Strategies page to enable them individually.</p>
+        <div className="space-y-4">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-2">
+            <div>
+              <p className="text-xs text-slate-500">
+                Real-time scanning and evaluation status across all configured trading strategies.
+              </p>
+            </div>
+            <div className="flex items-center gap-2 bg-slate-100 dark:bg-slate-800/80 p-1 rounded-xl">
+              <button
+                onClick={() => setStrategyFilter("all")}
+                className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
+                  strategyFilter === "all"
+                    ? "bg-white dark:bg-slate-700 text-slate-900 dark:text-white shadow-sm"
+                    : "text-slate-500 hover:text-slate-900 dark:hover:text-white"
+                }`}
+              >
+                All Strategies ({strategies.length})
+              </button>
+              <button
+                onClick={() => setStrategyFilter("active")}
+                className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
+                  strategyFilter === "active"
+                    ? "bg-green-600 text-white shadow-sm"
+                    : "text-slate-500 hover:text-slate-900 dark:hover:text-white"
+                }`}
+              >
+                Active Only ({strategies.filter(s => s.isEnabled).length})
+              </button>
+            </div>
           </div>
-        ) : (
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-            {strategies.map(strategy => {
-              const meta = MODE_META[strategy.operatingMode] ?? MODE_META.SignalOnly;
-              const recentSignals = signalLog.filter(s => s.strategyName === strategy.strategyName);
-              const lastSignal = recentSignals[0];
 
-              return (
-                <div
-                  key={strategy.id}
-                  className="bg-surface border border-slate-200 dark:border-slate-800 rounded-2xl p-6 shadow-sm flex flex-col justify-between transition-all hover:-translate-y-1 hover:shadow-md"
-                >
-                  <div>
-                    <div className="flex items-start justify-between mb-4">
-                      <h2 className="text-lg font-bold text-slate-900 dark:text-white leading-tight pr-2" title={strategy.strategyName}>
-                        {strategy.strategyName}
-                      </h2>
-                      <div className={`p-2 rounded-lg shrink-0 ${meta.bgColor}`}>{meta.icon}</div>
-                    </div>
+          {strategies.length === 0 ? (
+            <div className="flex flex-col items-center justify-center h-56 bg-surface rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm p-6 text-center">
+              <BarChart2 className="w-12 h-12 text-slate-300 dark:text-slate-700 mb-3" />
+              <p className="text-lg font-bold text-slate-700 dark:text-slate-300">No standalone strategies found</p>
+              <p className="text-xs text-slate-500 mt-1">Go to the Strategies page to configure your algorithmic units.</p>
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+              {(strategyFilter === "active" ? strategies.filter(s => s.isEnabled) : strategies).map(strategy => {
+                const meta = strategy.isEnabled
+                  ? (MODE_META[strategy.operatingMode] ?? MODE_META.SignalOnly)
+                  : {
+                      icon: <BarChart2 className="w-5 h-5 text-slate-400" />,
+                      color: "text-slate-400",
+                      bgColor: "bg-slate-100 dark:bg-slate-800",
+                      label: "Inactive · Disabled",
+                      desc: "This strategy is currently disabled in configuration and is NOT evaluated by the engine."
+                    };
+                const recentSignals = signalLog.filter(s => s.strategyName === strategy.strategyName);
+                const lastSignal = recentSignals[0];
+                const isToggling = togglingStrategyId === strategy.id;
 
-                    <div className="flex items-center gap-2 mb-4">
-                      <span className="relative flex w-2.5 h-2.5">
-                        <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75" />
-                        <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-green-500" />
-                      </span>
-                      <span className={`font-semibold text-xs ${meta.color}`}>{meta.label}</span>
-                    </div>
-
-                    {lastSignal && (
-                      <div className={`mb-4 px-3 py-2 rounded-lg text-xs flex items-center justify-between font-bold ${
-                        lastSignal.action === "BUY"
-                          ? "bg-green-50 dark:bg-green-900/20 text-green-700 dark:text-green-400"
-                          : "bg-red-50 dark:bg-red-900/20 text-red-700 dark:text-red-400"
-                      }`}>
-                        <span className="flex items-center gap-1.5">
-                          {lastSignal.action === "BUY" ? <TrendingUp className="w-3.5 h-3.5" /> : <TrendingDown className="w-3.5 h-3.5" />}
-                          Last: {lastSignal.action} @ ₹{lastSignal.price.toFixed(2)}
-                        </span>
-                        <span className="text-[10px] opacity-75">{fmtTime(lastSignal.generatedAt)}</span>
+                return (
+                  <div
+                    key={strategy.id}
+                    className={`bg-surface border rounded-2xl p-6 shadow-sm flex flex-col justify-between transition-all hover:-translate-y-1 hover:shadow-md ${
+                      strategy.isEnabled 
+                        ? "border-slate-200 dark:border-slate-800" 
+                        : "border-dashed border-slate-300 dark:border-slate-700 opacity-80"
+                    }`}
+                  >
+                    <div>
+                      <div className="flex items-start justify-between mb-4">
+                        <div>
+                          <h2 className="text-lg font-bold text-slate-900 dark:text-white leading-tight pr-2" title={strategy.strategyName}>
+                            {strategy.strategyName}
+                          </h2>
+                          <span className="text-[11px] text-slate-400">ID #{strategy.id}</span>
+                        </div>
+                        <div className={`p-2 rounded-lg shrink-0 ${meta.bgColor}`}>{meta.icon}</div>
                       </div>
-                    )}
-                  </div>
 
-                  <div className="grid grid-cols-2 gap-3 border-t border-slate-100 dark:border-slate-800 pt-3 text-xs">
-                    <div>
-                      <p className="text-slate-500 font-medium">Timeframe</p>
-                      <p className="font-bold text-slate-900 dark:text-white mt-0.5">{strategy.timeframeMinutes} Min</p>
+                      <div className="flex items-center justify-between mb-4">
+                        <div className="flex items-center gap-2">
+                          {strategy.isEnabled ? (
+                            <span className="relative flex w-2.5 h-2.5">
+                              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75" />
+                              <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-green-500" />
+                            </span>
+                          ) : (
+                            <span className="w-2.5 h-2.5 rounded-full bg-slate-400" />
+                          )}
+                          <span className={`font-semibold text-xs ${meta.color}`}>{meta.label}</span>
+                        </div>
+
+                        <button
+                          onClick={() => handleToggleStrategy(strategy.id)}
+                          disabled={isToggling}
+                          className={`text-xs px-2.5 py-1 rounded-lg font-bold transition-colors ${
+                            strategy.isEnabled
+                              ? "bg-red-50 text-red-600 hover:bg-red-100 dark:bg-red-900/20 dark:text-red-400"
+                              : "bg-emerald-50 text-emerald-600 hover:bg-emerald-100 dark:bg-emerald-900/20 dark:text-emerald-400"
+                          }`}
+                        >
+                          {isToggling ? "..." : strategy.isEnabled ? "Disable" : "Enable"}
+                        </button>
+                      </div>
+
+                      {!strategy.isEnabled && (
+                        <p className="text-[11px] text-slate-500 italic mb-3">
+                          Strategy is inactive. Click Enable to start live scanning on market ticks.
+                        </p>
+                      )}
+
+                      {lastSignal && (
+                        <div className={`mb-4 px-3 py-2 rounded-lg text-xs flex items-center justify-between font-bold ${
+                          lastSignal.action === "BUY"
+                            ? "bg-green-50 dark:bg-green-900/20 text-green-700 dark:text-green-400"
+                            : "bg-red-50 dark:bg-red-900/20 text-red-700 dark:text-red-400"
+                        }`}>
+                          <span className="flex items-center gap-1.5">
+                            {lastSignal.action === "BUY" ? <TrendingUp className="w-3.5 h-3.5" /> : <TrendingDown className="w-3.5 h-3.5" />}
+                            Last: {lastSignal.action} @ ₹{lastSignal.price.toFixed(2)}
+                          </span>
+                          <span className="text-[10px] opacity-75">{fmtTime(lastSignal.generatedAt)}</span>
+                        </div>
+                      )}
                     </div>
-                    <div>
-                      <p className="text-slate-500 font-medium">Target / SL</p>
-                      <p className="font-bold text-slate-900 dark:text-white mt-0.5">{strategy.perTradeGainPoint} / {strategy.perTradeStopLossPoint} pts</p>
+
+                    <div className="grid grid-cols-2 gap-3 border-t border-slate-100 dark:border-slate-800 pt-3 text-xs">
+                      <div>
+                        <p className="text-slate-500 font-medium">Timeframe</p>
+                        <p className="font-bold text-slate-900 dark:text-white mt-0.5">{strategy.timeframeMinutes} Min</p>
+                      </div>
+                      <div>
+                        <p className="text-slate-500 font-medium">Target / SL</p>
+                        <p className="font-bold text-slate-900 dark:text-white mt-0.5">{strategy.perTradeGainPoint} / {strategy.perTradeStopLossPoint} pts</p>
+                      </div>
                     </div>
                   </div>
-                </div>
-              );
-            })}
-          </div>
-        )
+                );
+              })}
+            </div>
+          )}
+        </div>
       )}
 
       {/* ── Approval Queue (Squad Consensus First) ── */}

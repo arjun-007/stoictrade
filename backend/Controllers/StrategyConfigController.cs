@@ -26,23 +26,47 @@ namespace StoicTrade.Api.Controllers
         [HttpPut("{id}")]
         public async Task<IActionResult> Update(int id, [FromBody] StrategyConfig config)
         {
-            if (id != config.Id) return BadRequest();
+            var existing = await _dbContext.StrategyConfigs.FindAsync(id);
+            if (existing == null) return NotFound(new { error = "Strategy not found." });
 
-            _dbContext.Entry(config).State = EntityState.Modified;
-            
+            existing.IsEnabled = config.IsEnabled;
+            if (!string.IsNullOrWhiteSpace(config.OperatingMode))
+                existing.OperatingMode = config.OperatingMode;
+            if (config.PerTradeGainPoint > 0)
+                existing.PerTradeGainPoint = config.PerTradeGainPoint;
+            if (config.PerTradeStopLossPoint > 0)
+                existing.PerTradeStopLossPoint = config.PerTradeStopLossPoint;
+            if (config.TimeframeMinutes > 0)
+                existing.TimeframeMinutes = config.TimeframeMinutes;
+            if (config.TrailingStopLossPoint > 0)
+                existing.TrailingStopLossPoint = config.TrailingStopLossPoint;
+            if (config.TrailingActivationPoint > 0)
+                existing.TrailingActivationPoint = config.TrailingActivationPoint;
+            if (!string.IsNullOrWhiteSpace(config.AdditionalParamsJson))
+                existing.AdditionalParamsJson = config.AdditionalParamsJson;
+
             try
             {
                 await _dbContext.SaveChangesAsync();
             }
-            catch (DbUpdateConcurrencyException)
+            catch (Exception ex)
             {
-                if (!await _dbContext.StrategyConfigs.AnyAsync(e => e.Id == id))
-                    return NotFound();
-                else
-                    throw;
+                return StatusCode(500, new { error = "Failed to save strategy changes: " + ex.Message });
             }
 
-            return NoContent();
+            return Ok(existing);
+        }
+
+        [HttpPost("{id}/toggle")]
+        public async Task<IActionResult> Toggle(int id)
+        {
+            var existing = await _dbContext.StrategyConfigs.FindAsync(id);
+            if (existing == null) return NotFound(new { error = "Strategy not found." });
+
+            existing.IsEnabled = !existing.IsEnabled;
+            await _dbContext.SaveChangesAsync();
+
+            return Ok(new { id = existing.Id, isEnabled = existing.IsEnabled });
         }
     }
 }

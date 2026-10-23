@@ -21,9 +21,25 @@ namespace StoicTrade.Api.Services.Strategies
             if (candles == null || candles.Count < period + 1) return 1.5m; // Default pass if initializing
             var lastCandle = candles.Last();
             var prevCandles = candles.Skip(candles.Count - period - 1).Take(period).ToList();
-            decimal avgVol = prevCandles.Any() ? prevCandles.Average(c => c.Volume) : 1m;
-            if (avgVol <= 0) return 1.5m;
-            return Math.Round(lastCandle.Volume / avgVol, 2);
+            
+            // 1. If traded volume is reported, compute standard volume ratio
+            decimal avgVol = prevCandles.Any() ? prevCandles.Average(c => c.Volume) : 0m;
+            if (avgVol > 0 && lastCandle.Volume > 0)
+            {
+                return Math.Round(lastCandle.Volume / avgVol, 2);
+            }
+
+            // 2. Fallback for Cash Index / Spot (e.g. NIFTY 50 where cash index has 0 volume):
+            // Use Relative Candle Range (High - Low) expansion vs Average Range as the institutional activity proxy
+            decimal avgRange = prevCandles.Any() ? prevCandles.Average(c => c.High - c.Low) : 10m;
+            decimal lastRange = lastCandle.High - lastCandle.Low;
+            if (avgRange > 0 && lastRange > 0)
+            {
+                decimal rangeRatio = Math.Round(lastRange / avgRange, 2);
+                return Math.Max(1.5m, rangeRatio);
+            }
+
+            return 1.6m;
         }
 
         public static decimal CalculateAtr(List<Candle> candles, int period = 14)
@@ -433,12 +449,22 @@ namespace StoicTrade.Api.Services.Strategies
             // Handle legacy state for backward compatibility
             if (currentState == "InPosition") currentState = "InPosition_Long";
 
+            var prevCandle = candles.Count >= 2 ? candles[candles.Count - 2] : null;
+            var prevFast = fastEma.Count >= 2 ? fastEma[fastEma.Count - 2] : null;
+            decimal rvol = StrategyFilterHelper.CalculateRvol(candles);
+
+            bool currentTouchedBull = lastCandle.Low <= (decimal)lastFast.Ema && lastCandle.Close > (decimal)lastFast.Ema;
+            bool prevTouchedBullBounce = prevCandle != null && prevFast?.Ema != null && prevCandle.Low <= (decimal)prevFast.Ema && lastCandle.Close > lastCandle.Open && lastCandle.Close > (decimal)lastFast.Ema;
+
+            bool currentTouchedBear = lastCandle.High >= (decimal)lastFast.Ema && lastCandle.Close < (decimal)lastFast.Ema;
+            bool prevTouchedBearBounce = prevCandle != null && prevFast?.Ema != null && prevCandle.High >= (decimal)prevFast.Ema && lastCandle.Close < lastCandle.Open && lastCandle.Close < (decimal)lastFast.Ema;
+
             if (currentState == "Idle")
             {
                 // BULLISH ENTRY
-                if (lastFast.Ema > lastSlow.Ema && lastCandle.Low <= (decimal)lastFast.Ema && lastCandle.Close > (decimal)lastFast.Ema)
+                if (lastFast.Ema > lastSlow.Ema && (currentTouchedBull || prevTouchedBullBounce))
                 {
-                    if (StrategyFilterHelper.IsMiddayChopHours()) return null;
+                    if (StrategyFilterHelper.IsMiddayChopHours() && rvol < 2.0m) return null;
                     if (!StrategyFilterHelper.CheckHtfGate(_aggregator, "BUY")) return null;
 
                     if (checkFvg)
@@ -451,7 +477,6 @@ namespace StoicTrade.Api.Services.Strategies
                     decimal atr = StrategyFilterHelper.CalculateAtr(candles);
                     decimal sl = Math.Round(lastCandle.Close - (1.0m * atr), 2);
                     decimal target = Math.Round(lastCandle.Close + (1.8m * atr), 2);
-                    decimal rvol = StrategyFilterHelper.CalculateRvol(candles);
 
                     await _redis.SetValueAsync(stateKey, "InPosition_Long", TimeSpan.FromHours(8));
                     return new Signal
@@ -470,9 +495,9 @@ namespace StoicTrade.Api.Services.Strategies
                     };
                 }
                 // BEARISH ENTRY (PE)
-                else if (lastFast.Ema < lastSlow.Ema && lastCandle.High >= (decimal)lastFast.Ema && lastCandle.Close < (decimal)lastFast.Ema)
+                else if (lastFast.Ema < lastSlow.Ema && (currentTouchedBear || prevTouchedBearBounce))
                 {
-                    if (StrategyFilterHelper.IsMiddayChopHours()) return null;
+                    if (StrategyFilterHelper.IsMiddayChopHours() && rvol < 2.0m) return null;
                     if (!StrategyFilterHelper.CheckHtfGate(_aggregator, "SELL")) return null;
 
                     if (checkFvg)
@@ -485,7 +510,6 @@ namespace StoicTrade.Api.Services.Strategies
                     decimal atr = StrategyFilterHelper.CalculateAtr(candles);
                     decimal sl = Math.Round(lastCandle.Close + (1.0m * atr), 2);
                     decimal target = Math.Round(lastCandle.Close - (1.8m * atr), 2);
-                    decimal rvol = StrategyFilterHelper.CalculateRvol(candles);
 
                     await _redis.SetValueAsync(stateKey, "InPosition_Short", TimeSpan.FromHours(8));
                     return new Signal
@@ -864,7 +888,7 @@ namespace StoicTrade.Api.Services.Strategies
             if (currentState == "Idle")
             {
                 decimal rvol = StrategyFilterHelper.CalculateRvol(candles);
-                if (StrategyFilterHelper.IsMiddayChopHours()) return null;
+                if (StrategyFilterHelper.IsMiddayChopHours() && rvol < 2.0m) return null;
 
                 // BULLISH ENTRY
                 if (crossoverBullish && lastMacd.Macd < 0 && lastRsi >= 50.0 && (!lastVwap.HasValue || lastCandle.Close > (decimal)lastVwap.Value))
@@ -1084,7 +1108,8 @@ namespace StoicTrade.Api.Services.Strategies
 
             if (currentState == "Idle")
             {
-                if (StrategyFilterHelper.IsMiddayChopHours()) return null;
+                decimal rvol = StrategyFilterHelper.CalculateRvol(candles);
+                if (StrategyFilterHelper.IsMiddayChopHours() && rvol < 1.8m) return null;
 
                 // BULLISH ENTRY
                 if (isBullishMitigating && latestBullishFvg != null)
@@ -1092,7 +1117,6 @@ namespace StoicTrade.Api.Services.Strategies
                     if (!StrategyFilterHelper.CheckHtfGate(_aggregator, "BUY")) return null;
 
                     decimal atr = StrategyFilterHelper.CalculateAtr(candles);
-                    decimal rvol = StrategyFilterHelper.CalculateRvol(candles);
 
                     decimal sl = Math.Round(latestBullishFvg.BottomPrice - 5.0m, 2);
                     decimal risk = Math.Max(12m, lastCandle.Close - sl);
@@ -1123,7 +1147,6 @@ namespace StoicTrade.Api.Services.Strategies
                     if (!StrategyFilterHelper.CheckHtfGate(_aggregator, "SELL")) return null;
 
                     decimal atr = StrategyFilterHelper.CalculateAtr(candles);
-                    decimal rvol = StrategyFilterHelper.CalculateRvol(candles);
 
                     decimal sl = Math.Round(latestBearishFvg.TopPrice + 5.0m, 2);
                     decimal risk = Math.Max(12m, sl - lastCandle.Close);
