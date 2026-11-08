@@ -159,6 +159,35 @@ namespace StoicTrade.Api.Controllers
                     });
                 }
 
+                // Sync actual broker fill price (buyAvg) from Fyers netPositions on BUY
+                if (side == "BUY")
+                {
+                    try
+                    {
+                        await Task.Delay(400);
+                        var livePos = await fyersApi.GetPositionsAsync();
+                        if (livePos.ValueKind != System.Text.Json.JsonValueKind.Undefined &&
+                            livePos.TryGetProperty("netPositions", out var netPosArr))
+                        {
+                            foreach (var p in netPosArr.EnumerateArray())
+                            {
+                                string sym = p.TryGetProperty("symbol", out var sProp) ? sProp.GetString() ?? "" : "";
+                                int nq = p.TryGetProperty("netQty", out var nqProp) ? nqProp.GetInt32() : 0;
+                                if (nq > 0 && NormaliseSymbol(sym) == normalisedInstrument)
+                                {
+                                    decimal brokerBuyAvg = p.TryGetProperty("buyAvg", out var baProp) ? baProp.GetDecimal() : 0m;
+                                    if (brokerBuyAvg > 0 && brokerBuyAvg < 5000)
+                                    {
+                                        executionPrice = brokerBuyAvg;
+                                    }
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                    catch { }
+                }
+
                 // Record live trade in database for local audit and reporting
                 var liveTrade = new StoicTrade.Api.Models.TradeLog
                 {

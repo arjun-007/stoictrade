@@ -65,7 +65,12 @@ namespace StoicTrade.Api.Controllers
                 if (signal == null) return BadRequest(new { Message = "Invalid signal payload." });
                 
                 // Execute the order
-                await _orderManager.ExecuteOrderAsync(signal);
+                bool executed = await _orderManager.ExecuteOrderAsync(signal);
+                if (!executed)
+                {
+                    _logger.LogWarning("Signal {SignalId} approval failed to execute (live option quote unavailable or broker rejected).", signalId);
+                    return BadRequest(new { Message = "Order execution failed: live today's option LTP is not available yet or broker rejected the order." });
+                }
                 
                 // Remove from pending
                 await _redisService.DeleteKeyAsync(key);

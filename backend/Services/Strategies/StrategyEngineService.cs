@@ -97,11 +97,22 @@ namespace StoicTrade.Api.Services.Strategies
                         _lastStateResetDate = todayIst;
                     }
 
-                    // 1. Daily 9:15 AM IST Session Reset: Clear stale signal logs for clean day-to-day tracking
+                    // 1. Daily 9:15 AM IST Session Reset: Clear stale signal logs, pre-market option quotes, and off-market candles
                     if (nowIst >= marketOpen && _lastDailyResetDate != todayIst)
                     {
-                        _logger.LogInformation("Daily 09:15 AM IST market session opened. Resetting Live Signal Log for clean day-to-day session tracking.");
+                        _logger.LogInformation("Daily 09:15 AM IST market session opened. Resetting Live Signal Log, flushing pre-market option quotes, and clearing strategy states.");
                         ClearSignals();
+                        using var resetScope = _serviceProvider.CreateScope();
+                        var resetCache = resetScope.ServiceProvider.GetRequiredService<StoicTrade.Api.Services.MarketData.MarketDataCache>();
+                        var resetAggregator = resetScope.ServiceProvider.GetRequiredService<StoicTrade.Api.Services.MarketData.MarketDataAggregatorService>();
+                        var resetRedis = resetScope.ServiceProvider.GetRequiredService<StoicTrade.Api.Services.RedisService>();
+                        resetCache.ClearOptionPrices();
+                        resetAggregator.PurgeOffMarketCandles();
+                        var openStateKeys = await resetRedis.GetKeysByPrefixAsync("strategy_state_");
+                        foreach (var key in openStateKeys)
+                        {
+                            await resetRedis.DeleteKeyAsync(key);
+                        }
                         _lastDailyResetDate = todayIst;
                     }
 
@@ -150,8 +161,21 @@ namespace StoicTrade.Api.Services.Strategies
                     }
 
                     // 5b. Monitor active positions for Target, Stop Loss, and Trailing Stop Loss
-                    var orderManager = scope.ServiceProvider.GetRequiredService<OrderManagementService>();
-                    await orderManager.MonitorActivePositionsAsync(_serviceProvider);
+                    // Wait 10 seconds after 09:15:00 AM open so pre-market cache flush and first live Fyers poll complete before evaluating SL/Target
+                    if (nowIst >= new TimeSpan(9, 15, 10))
+                    {
+                        var orderManager = scope.ServiceProvider.GetRequiredService<OrderManagementService>();
+                        await orderManager.MonitorActivePositionsAsync(_serviceProvider);
+                    }
+
+                    // 5c. Opening Stabilization Guard (09:15:00 - 09:16:00 AM IST):
+                    // Wait for the first 1-minute candle to form and for live post-open option quotes to replace yesterday's closing prices
+                    var strategyEntryStart = new TimeSpan(9, 16, 0);
+                    if (nowIst < strategyEntryStart)
+                    {
+                        await Task.Delay(2000, stoppingToken);
+                        continue;
+                    }
 
                     // 6. Fetch enabled strategies and strategy groups from DB
                     var activeConfigs = dbContext.StrategyConfigs.Where(s => s.IsEnabled).ToList();
@@ -281,9 +305,17 @@ namespace StoicTrade.Api.Services.Strategies
                                     if (!string.IsNullOrEmpty(contract))
                                     {
                                         string optSymbol = contract.Replace("NSE:", "");
+                                        var optLtp = optionEngine.ResolveOptionLtp(optSymbol, requireLiveTodayQuote: true);
+                                        if (!optLtp.HasValue || optLtp.Value <= 0)
+                                        {
+                                            _logger.LogWarning("StrategyEngine: Skipping {StrategyName} entry for {OptSymbol} — live today's option LTP not yet available (preventing execution on yesterday's close).", signal.StrategyName, optSymbol);
+                                            var redis = scope.ServiceProvider.GetService<RedisService>();
+                                            if (redis != null) await redis.DeleteKeyAsync($"strategy_state_{config.Id}");
+                                            continue;
+                                        }
+
                                         signal.Instrument = optSymbol;
-                                        var optLtp = optionEngine.ResolveOptionLtp(optSymbol);
-                                        signal.Price = (optLtp.HasValue && optLtp.Value > 0) ? optLtp.Value : 150m;
+                                        signal.Price = optLtp.Value;
                                         signal.ExpectedPrice = signal.Price;
                                         // For option buyers: whether the index was Bullish (Buy CE) or Bearish (Buy PE),
                                         // the order action on the option contract is ALWAYS "BUY"
@@ -297,6 +329,13 @@ namespace StoicTrade.Api.Services.Strategies
 
                                         signal.TargetPrice = Math.Round(signal.Price + optionTargetDelta, 2);
                                         signal.StopLossPrice = Math.Round(Math.Max(5.0m, signal.Price - optionSlDelta), 2);
+                                    }
+                                    else
+                                    {
+                                        _logger.LogWarning("StrategyEngine: Skipping {StrategyName} entry — live today's option chain is not ready yet.", signal.StrategyName);
+                                        var redis = scope.ServiceProvider.GetService<RedisService>();
+                                        if (redis != null) await redis.DeleteKeyAsync($"strategy_state_{config.Id}");
+                                        continue;
                                     }
                                 }
 
@@ -419,9 +458,15 @@ namespace StoicTrade.Api.Services.Strategies
                             if (!string.IsNullOrEmpty(contract))
                             {
                                 string optSymbol = contract.Replace("NSE:", "");
+                                var optLtp = optionEngine.ResolveOptionLtp(optSymbol, requireLiveTodayQuote: true);
+                                if (!optLtp.HasValue || optLtp.Value <= 0)
+                                {
+                                    _logger.LogWarning("StrategyEngine: Skipping group {GroupName} entry for {OptSymbol} — live today's option LTP not yet available.", group.Name, optSymbol);
+                                    continue;
+                                }
+
                                 groupSignal.Instrument = optSymbol;
-                                var optLtp = optionEngine.ResolveOptionLtp(optSymbol);
-                                groupSignal.Price = (optLtp.HasValue && optLtp.Value > 0) ? optLtp.Value : 150m;
+                                groupSignal.Price = optLtp.Value;
                                 groupSignal.ExpectedPrice = groupSignal.Price;
                                 // For option buyers: option contract order action is always "BUY"
                                 groupSignal.Action = "BUY";
@@ -433,6 +478,11 @@ namespace StoicTrade.Api.Services.Strategies
 
                                 groupSignal.TargetPrice = Math.Round(groupSignal.Price + optionTargetDelta, 2);
                                 groupSignal.StopLossPrice = Math.Round(Math.Max(5.0m, groupSignal.Price - optionSlDelta), 2);
+                            }
+                            else
+                            {
+                                _logger.LogWarning("StrategyEngine: Skipping group {GroupName} entry — live today's option chain is not ready yet.", group.Name);
+                                continue;
                             }
 
                             // Anti-Spam / Cooldown Check for Squad signals

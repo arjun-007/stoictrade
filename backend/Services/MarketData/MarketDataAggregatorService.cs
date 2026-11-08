@@ -53,18 +53,30 @@ namespace StoicTrade.Api.Services.MarketData
         private static List<Candle> GenerateSeedCandles(decimal basePrice, int resolutionMinutes, int count)
         {
             var list = new List<Candle>();
-            var now = DateTime.UtcNow;
+            var ist = TimeZoneHelper.GetIstTimeZone();
+            var nowIst = TimeZoneInfo.ConvertTimeFromUtc(DateTime.UtcNow, ist);
+            // Anchor seed candles to end at yesterday's 15:25 IST close so they never impersonate today's >= 09:15 AM live session candles
+            var prevSessionEndIst = nowIst.Date.AddDays(-1).Add(new TimeSpan(15, 25, 0));
+            var anchorUtc = TimeZoneInfo.ConvertTimeToUtc(prevSessionEndIst, ist);
+
             var rand = new Random(42);
-            decimal currentPrice = basePrice > 0 ? basePrice : 24200m;
+            decimal targetEndPrice = basePrice > 0 ? basePrice : 24200m;
+            var deltas = new decimal[count];
+            for (int idx = 0; idx < count; idx++)
+            {
+                deltas[idx] = (decimal)(rand.NextDouble() * 16.0 - 8.0);
+            }
+            decimal totalDrift = deltas.Sum();
+            decimal currentPrice = targetEndPrice - totalDrift;
 
             for (int i = count; i >= 1; i--)
             {
-                var candleTime = now.AddMinutes(-i * resolutionMinutes);
-                decimal delta = (decimal)(rand.NextDouble() * 30.0 - 14.8);
+                var candleTime = anchorUtc.AddMinutes(-(i - 1) * resolutionMinutes);
+                decimal delta = deltas[count - i];
                 decimal open = currentPrice;
                 decimal close = open + delta;
-                decimal high = Math.Max(open, close) + (decimal)(rand.NextDouble() * 10.0);
-                decimal low = Math.Min(open, close) - (decimal)(rand.NextDouble() * 10.0);
+                decimal high = Math.Max(open, close) + (decimal)(rand.NextDouble() * 6.0);
+                decimal low = Math.Min(open, close) - (decimal)(rand.NextDouble() * 6.0);
                 decimal vol = rand.Next(1000, 15000);
 
                 list.Add(new Candle
@@ -87,6 +99,16 @@ namespace StoicTrade.Api.Services.MarketData
         public void UpdateTick(string symbol, decimal price, decimal volume = 0, DateTime? timestamp = null)
         {
             var time = timestamp ?? DateTime.UtcNow;
+            var ist = TimeZoneHelper.GetIstTimeZone();
+            var timeIst = TimeZoneInfo.ConvertTimeFromUtc(DateTime.SpecifyKind(time, DateTimeKind.Utc), ist);
+            var todIst = timeIst.TimeOfDay;
+
+            // Strict Indian Market Hours Guard for candle aggregation:
+            // Never create or update intraday candles from pre-market (< 09:15 AM) or post-market (> 03:30 PM) ticks
+            if (todIst < new TimeSpan(9, 15, 0) || todIst > new TimeSpan(15, 30, 0))
+            {
+                return;
+            }
             
             long currentTicks = System.Threading.Interlocked.Increment(ref _totalTicksReceived);
 
@@ -161,6 +183,36 @@ namespace StoicTrade.Api.Services.MarketData
                 }
             }
             return new List<Candle>();
+        }
+
+        /// <summary>
+        /// Purges any intraday candles that were recorded outside strict NSE market hours (09:15 - 15:30 IST).
+        /// Called at 09:15 AM market open to ensure pre-market (09:00 - 09:14 AM) ticks never pollute strategy indicators.
+        /// </summary>
+        public void PurgeOffMarketCandles()
+        {
+            var ist = TimeZoneHelper.GetIstTimeZone();
+            var marketOpen = new TimeSpan(9, 15, 0);
+            var marketClose = new TimeSpan(15, 30, 0);
+
+            foreach (var symbolKvp in _historicalCandles)
+            {
+                foreach (var resKvp in symbolKvp.Value)
+                {
+                    if (resKvp.Key >= 1440) continue; // Skip daily candles
+                    var candles = resKvp.Value;
+                    if (candles == null) continue;
+
+                    lock (candles)
+                    {
+                        candles.RemoveAll(c =>
+                        {
+                            var dtIst = TimeZoneInfo.ConvertTimeFromUtc(DateTime.SpecifyKind(c.Date, DateTimeKind.Utc), ist);
+                            return dtIst.TimeOfDay < marketOpen || dtIst.TimeOfDay > marketClose;
+                        });
+                    }
+                }
+            }
         }
     }
 }

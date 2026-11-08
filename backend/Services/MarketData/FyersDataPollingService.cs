@@ -27,6 +27,10 @@ namespace StoicTrade.Api.Services.MarketData
         private readonly OptionChainAnalysisService _optionChainService;
         private decimal _simulatedNiftyPrice = 24250.0m;
         private readonly Random _random = new Random();
+        private DateTime? _lastMarketOpenFlushDate = null;
+        // Tracks pre-market (< 09:15 AM IST) option quotes (which represent yesterday's close/volume on Fyers)
+        // so that at 09:15 AM open we can verify Fyers has actually updated the contract with today's live session data.
+        private readonly System.Collections.Concurrent.ConcurrentDictionary<string, (decimal Lp, decimal Volume, decimal OpenPrice)> _preMarketOptionSnapshots = new();
 
         public FyersDataPollingService(
             ILogger<FyersDataPollingService> logger,
@@ -82,19 +86,32 @@ namespace StoicTrade.Api.Services.MarketData
 
                     // 2. Off-market check (>= 3:40 PM or < 9:15 AM IST)
                     var ist = StoicTrade.Api.Services.TimeZoneHelper.GetIstTimeZone();
-                    var nowIst = TimeZoneInfo.ConvertTimeFromUtc(DateTime.UtcNow, ist).TimeOfDay;
+                    var nowIstDateTime = TimeZoneInfo.ConvertTimeFromUtc(DateTime.UtcNow, ist);
+                    var nowIst = nowIstDateTime.TimeOfDay;
+                    var todayIst = nowIstDateTime.Date;
                     var autoStopCutoff = new TimeSpan(15, 40, 0); // 3:40 PM IST
                     var marketOpen = new TimeSpan(9, 15, 0);      // 9:15 AM IST
+                    var preOpenFinalMinute = new TimeSpan(9, 14, 0);
                     bool isMarketHours = (nowIst < autoStopCutoff && nowIst >= marketOpen);
+
+                    // Flush any pre-market (09:00-09:14 AM) option prices (which hold yesterday's close) and pre-market candles at 09:15 AM open
+                    if (isMarketHours && _lastMarketOpenFlushDate != todayIst)
+                    {
+                        _logger.LogInformation("Fyers Poller: 09:15 AM IST market open reached. Flushing pre-market option quotes and off-market candles.");
+                        _cache.ClearOptionPrices();
+                        _aggregator.PurgeOffMarketCandles();
+                        _lastMarketOpenFlushDate = todayIst;
+                    }
                     
-                    delay = isMarketHours ? 2000 : 15000;
+                    // Poll every 2s during market hours, 1s during the final pre-open minute (09:14-09:15) for instant transition at 09:15:00, and 15s off-market
+                    delay = isMarketHours ? 2000 : (nowIst >= preOpenFinalMinute && nowIst < marketOpen ? 1000 : 15000);
 
 
                     var token = _fyersApi.GetAccessToken();
 
                     if (!string.IsNullOrEmpty(token))
                     {
-                        await PollLiveFyersDataAsync(token, stoppingToken);
+                        await PollLiveFyersDataAsync(token, isMarketHours, stoppingToken);
                     }
                     else if (isMarketHours && string.IsNullOrEmpty(token))
                     {
@@ -119,7 +136,7 @@ namespace StoicTrade.Api.Services.MarketData
             _logger.LogInformation("Fyers Data Polling Service is stopping.");
         }
 
-        private async Task PollLiveFyersDataAsync(string token, CancellationToken stoppingToken)
+        private async Task PollLiveFyersDataAsync(string token, bool isMarketHours, CancellationToken stoppingToken)
         {
             _httpClient.DefaultRequestHeaders.Clear();
             _httpClient.DefaultRequestHeaders.TryAddWithoutValidation("Authorization", $"{_config["FYERS_APP_ID"]}:{token}");
@@ -185,7 +202,10 @@ namespace StoicTrade.Api.Services.MarketData
                             await _aggregator.InitializeSymbolAsync("NSE:NIFTY50-INDEX", new[] { 1, 5, 15 }, niftySpotPrice);
                             _isAggregatorInitialized = true;
                         }
-                        _aggregator.UpdateTick("NSE:NIFTY50-INDEX", niftySpotPrice, volume);
+                        if (isMarketHours)
+                        {
+                            _aggregator.UpdateTick("NSE:NIFTY50-INDEX", niftySpotPrice, volume);
+                        }
                     }
                     else
                     {
@@ -247,7 +267,7 @@ namespace StoicTrade.Api.Services.MarketData
                 _cache.UpdateOptionChainData("NIFTY", mappedJson);
 
                 foreach (var doc in allOptionDocs)
-                    CacheIndividualOptionPrices(doc);
+                    CacheIndividualOptionPrices(doc, isMarketHours);
             }
         }
 
@@ -479,7 +499,7 @@ namespace StoicTrade.Api.Services.MarketData
             });
         }
 
-        private void CacheIndividualOptionPrices(JsonDocument fyersDoc)
+        private void CacheIndividualOptionPrices(JsonDocument fyersDoc, bool isMarketHours)
         {
             try
             {
@@ -505,9 +525,66 @@ namespace StoicTrade.Api.Services.MarketData
                     if (!v.TryGetProperty("lp", out var lpProp)) continue;
                     decimal lp = lpProp.GetDecimal();
 
-                    // Store under canonical key "NIFTY{expiry}{strike}{type}" e.g. "NIFTY26AUG24250CE"
+                    // Determine if this option strike has actually traded in today's live session (>= 09:15 AM IST).
+                    // Before 09:15 AM (or before the strike prints its first trade tick of the day), Fyers 'lp' is last trading day's close price!
+                    decimal vol = (v.TryGetProperty("volume", out var volProp) && volProp.ValueKind == JsonValueKind.Number) ? volProp.GetDecimal() : -1m;
+                    decimal openPrice = (v.TryGetProperty("open_price", out var openProp) && openProp.ValueKind == JsonValueKind.Number) ? openProp.GetDecimal() : -1m;
+
                     string canonicalKey = $"NIFTY{expiry}{strike}{type}";
-                    _cache.UpdateOptionPrice(canonicalKey, lp);
+
+                    bool tradedToday = isMarketHours;
+                    if (!isMarketHours)
+                    {
+                        // Record pre-market baseline (yesterday's close/volume) so we can detect if Fyers still serves stale data right after 09:15:00 AM
+                        _preMarketOptionSnapshots[canonicalKey] = (lp, vol, openPrice);
+                        tradedToday = false;
+                    }
+                    else
+                    {
+                        if (vol == 0m || openPrice == 0m)
+                        {
+                            tradedToday = false;
+                        }
+
+                        // Check last trade time ('tt') if provided by Fyers quotes API
+                        if (tradedToday && v.TryGetProperty("tt", out var ttProp))
+                        {
+                            long ttEpoch = 0;
+                            if (ttProp.ValueKind == JsonValueKind.Number) ttProp.TryGetInt64(out ttEpoch);
+                            else if (ttProp.ValueKind == JsonValueKind.String) long.TryParse(ttProp.GetString(), out ttEpoch);
+
+                            if (ttEpoch > 1000000000L)
+                            {
+                                var ttUtc = ttEpoch > 100000000000L
+                                    ? DateTimeOffset.FromUnixTimeMilliseconds(ttEpoch).UtcDateTime
+                                    : DateTimeOffset.FromUnixTimeSeconds(ttEpoch).UtcDateTime;
+                                var ist = TimeZoneHelper.GetIstTimeZone();
+                                var ttDateIst = TimeZoneInfo.ConvertTimeFromUtc(ttUtc, ist).Date;
+                                var todayIst = TimeZoneInfo.ConvertTimeFromUtc(DateTime.UtcNow, ist).Date;
+                                if (ttDateIst < todayIst)
+                                {
+                                    tradedToday = false;
+                                }
+                            }
+                        }
+
+                        // If engine was started pre-market (e.g. 09:10 AM), reject quote right after 09:15 AM if Fyers is still returning the exact pre-market snapshot
+                        if (tradedToday && _preMarketOptionSnapshots.TryGetValue(canonicalKey, out var preSnap))
+                        {
+                            if (lp == preSnap.Lp && vol == preSnap.Volume && openPrice == preSnap.OpenPrice)
+                            {
+                                tradedToday = false;
+                            }
+                            else
+                            {
+                                // Live session tick confirmed for this strike; remove pre-market snapshot
+                                _preMarketOptionSnapshots.TryRemove(canonicalKey, out _);
+                            }
+                        }
+                    }
+
+                    // Store under canonical key "NIFTY{expiry}{strike}{type}" e.g. "NIFTY26AUG24250CE"
+                    _cache.UpdateOptionPrice(canonicalKey, lp, tradedToday);
                 }
             }
             catch (Exception ex)

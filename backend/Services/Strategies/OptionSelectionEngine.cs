@@ -32,6 +32,23 @@ namespace StoicTrade.Api.Services.Strategies
                 return null;
             }
 
+            // During market hours (09:15 - 15:30 IST), ensure the option chain and spot data were fetched AFTER 09:15:00 AM IST today
+            var ist = TimeZoneHelper.GetIstTimeZone();
+            var nowIst = TimeZoneInfo.ConvertTimeFromUtc(DateTime.UtcNow, ist);
+            var marketOpenTodayIst = nowIst.Date.Add(new TimeSpan(9, 15, 0));
+            var marketCloseTodayIst = nowIst.Date.Add(new TimeSpan(15, 30, 0));
+
+            if (nowIst >= marketOpenTodayIst && nowIst <= marketCloseTodayIst)
+            {
+                var chainUpdatedUtc = _cache.GetOptionChainUpdatedAt(underlyingSymbol);
+                var spotUpdatedIst = TimeZoneInfo.ConvertTimeFromUtc(spotData.Timestamp, ist);
+                if (!chainUpdatedUtc.HasValue || TimeZoneInfo.ConvertTimeFromUtc(chainUpdatedUtc.Value, ist) < marketOpenTodayIst || spotUpdatedIst < marketOpenTodayIst)
+                {
+                    _logger.LogWarning("OptionSelectionEngine: Rejecting stale pre-market option chain/spot snapshot for {Underlying}. Waiting for live post-09:15 AM tick.", underlyingSymbol);
+                    return null;
+                }
+            }
+
             try
             {
                 using var doc = JsonDocument.Parse(rawJson);
@@ -52,8 +69,7 @@ namespace StoicTrade.Api.Services.Strategies
                         : atmStrike + (itmDistance * 50);
 
                     // Current IST date to filter out any past expired contracts
-                    var ist = TimeZoneHelper.GetIstTimeZone();
-                    DateTime today = TimeZoneInfo.ConvertTimeFromUtc(DateTime.UtcNow, ist).Date;
+                    DateTime today = nowIst.Date;
 
                     // Collect all distinct expiries, filter out expired dates, group by parsed date, and sort strictly chronologically
                     var distinctExpiries = dataArray.EnumerateArray()
@@ -150,7 +166,7 @@ namespace StoicTrade.Api.Services.Strategies
             return null;
         }
 
-        public decimal? ResolveOptionLtp(string symbol)
+        public decimal? ResolveOptionLtp(string symbol, bool requireLiveTodayQuote = true)
         {
             if (string.IsNullOrWhiteSpace(symbol)) return null;
             string canonical = symbol.Trim();
@@ -158,9 +174,25 @@ namespace StoicTrade.Api.Services.Strategies
             if (canonical.StartsWith("NIFTYNIFTY", StringComparison.OrdinalIgnoreCase)) canonical = canonical.Substring(5);
             canonical = canonical.Replace(" ", "");
 
-            return _cache.GetOptionPrice(canonical)
-                ?? _cache.GetOptionPrice(symbol)
-                ?? _cache.GetSpotData(canonical)?.Price;
+            var ist = TimeZoneHelper.GetIstTimeZone();
+            var nowIst = TimeZoneInfo.ConvertTimeFromUtc(DateTime.UtcNow, ist).TimeOfDay;
+            bool isMarketHours = nowIst >= new TimeSpan(9, 15, 0) && nowIst <= new TimeSpan(15, 30, 0);
+            bool enforceLiveSession = requireLiveTodayQuote && isMarketHours;
+
+            var optPrice = _cache.GetOptionPrice(canonical, enforceLiveSession)
+                ?? _cache.GetOptionPrice(symbol, enforceLiveSession);
+
+            if (optPrice.HasValue && optPrice.Value > 0)
+                return optPrice.Value;
+
+            // Only fall back to spot data if the symbol is NOT an option contract
+            if (!canonical.EndsWith("CE", StringComparison.OrdinalIgnoreCase) &&
+                !canonical.EndsWith("PE", StringComparison.OrdinalIgnoreCase))
+            {
+                return _cache.GetSpotData(canonical)?.Price;
+            }
+
+            return null;
         }
     }
 }

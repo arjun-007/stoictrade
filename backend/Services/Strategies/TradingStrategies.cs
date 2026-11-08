@@ -115,6 +115,28 @@ namespace StoicTrade.Api.Services.Strategies
             }
             return true;
         }
+
+        /// <summary>
+        /// Verifies that today's live market session (>= 09:15 AM IST) has started, passed the initial 1-minute opening stabilization window (>= 09:16 AM IST),
+        /// and produced at least the required number of valid intraday candles from today's session so strategies never trigger on yesterday's closing candles.
+        /// </summary>
+        public static bool HasValidTodaySessionCandles(List<Candle> candles, int minTodayCandles = 1)
+        {
+            if (candles == null || !candles.Any()) return false;
+            var ist = TimeZoneHelper.GetIstTimeZone();
+            var nowIst = TimeZoneInfo.ConvertTimeFromUtc(DateTime.UtcNow, ist);
+            if (nowIst.TimeOfDay < new TimeSpan(9, 16, 0) || nowIst.TimeOfDay > new TimeSpan(15, 30, 0))
+                return false;
+
+            var todayOpenIst = nowIst.Date.Add(new TimeSpan(9, 15, 0));
+            int todayCount = candles.Count(c =>
+            {
+                var cIst = TimeZoneInfo.ConvertTimeFromUtc(DateTime.SpecifyKind(c.Date, DateTimeKind.Utc), ist);
+                return cIst >= todayOpenIst;
+            });
+
+            return todayCount >= minTodayCandles;
+        }
     }
 
     public class SupertrendStrategy : IStrategy
@@ -168,8 +190,10 @@ namespace StoicTrade.Api.Services.Strategies
 
             if (currentState == "Idle")
             {
+                if (!StrategyFilterHelper.HasValidTodaySessionCandles(candles, minTodayCandles: 1)) return null;
+
                 // BULLISH ENTRY
-                if (consecutiveGreen || lastCandle.Close > (decimal)lastSt.SuperTrend)
+                if (consecutiveGreen)
                 {
                     decimal rvol = StrategyFilterHelper.CalculateRvol(candles);
                     if (StrategyFilterHelper.IsMiddayChopHours() && rvol < 2.0m) return null;
@@ -197,7 +221,7 @@ namespace StoicTrade.Api.Services.Strategies
                     };
                 }
                 // BEARISH ENTRY (PE)
-                else if (consecutiveRed || lastCandle.Close < (decimal)lastSt.SuperTrend)
+                else if (consecutiveRed)
                 {
                     decimal rvol = StrategyFilterHelper.CalculateRvol(candles);
                     if (StrategyFilterHelper.IsMiddayChopHours() && rvol < 2.0m) return null;
@@ -286,8 +310,10 @@ namespace StoicTrade.Api.Services.Strategies
             bool useOptionGate = paramsDoc.RootElement.TryGetProperty("useOptionGate", out var optElem) && optElem.GetBoolean();
 
             var ist = TimeZoneHelper.GetIstTimeZone();
-            var todayIst = TimeZoneInfo.ConvertTimeFromUtc(DateTime.UtcNow, ist).Date;
-            var todayCandles = candles.Where(c => TimeZoneInfo.ConvertTimeFromUtc(c.Date, ist).Date == todayIst).ToList();
+            var todayOpenIst = TimeZoneInfo.ConvertTimeFromUtc(DateTime.UtcNow, ist).Date.Add(new TimeSpan(9, 15, 0));
+            var todayCandles = candles
+                .Where(c => TimeZoneInfo.ConvertTimeFromUtc(DateTime.SpecifyKind(c.Date, DateTimeKind.Utc), ist) >= todayOpenIst)
+                .ToList();
             if (todayCandles.Count < 3) return null;
 
             var orbHigh = todayCandles.Take(3).Max(c => c.High);
@@ -461,6 +487,8 @@ namespace StoicTrade.Api.Services.Strategies
 
             if (currentState == "Idle")
             {
+                if (!StrategyFilterHelper.HasValidTodaySessionCandles(candles, minTodayCandles: 1)) return null;
+
                 // BULLISH ENTRY
                 if (lastFast.Ema > lastSlow.Ema && (currentTouchedBull || prevTouchedBullBounce))
                 {
@@ -606,6 +634,8 @@ namespace StoicTrade.Api.Services.Strategies
 
             if (currentState == "Idle")
             {
+                if (!StrategyFilterHelper.HasValidTodaySessionCandles(candles, minTodayCandles: 1)) return null;
+
                 decimal rvol = StrategyFilterHelper.CalculateRvol(candles);
                 if (rvol < 1.5m) return null;
                 if (StrategyFilterHelper.IsMiddayChopHours() && rvol < 2.5m) return null;
@@ -746,6 +776,8 @@ namespace StoicTrade.Api.Services.Strategies
 
             if (currentState == "Idle" && isNr7)
             {
+                if (!StrategyFilterHelper.HasValidTodaySessionCandles(candles, minTodayCandles: 1)) return null;
+
                 decimal rvol = StrategyFilterHelper.CalculateRvol(candles);
                 if (rvol < 1.5m) return null;
                 if (StrategyFilterHelper.IsMiddayChopHours() && rvol < 2.5m) return null;
@@ -887,6 +919,8 @@ namespace StoicTrade.Api.Services.Strategies
 
             if (currentState == "Idle")
             {
+                if (!StrategyFilterHelper.HasValidTodaySessionCandles(candles, minTodayCandles: 1)) return null;
+
                 decimal rvol = StrategyFilterHelper.CalculateRvol(candles);
                 if (StrategyFilterHelper.IsMiddayChopHours() && rvol < 2.0m) return null;
 
@@ -1014,6 +1048,8 @@ namespace StoicTrade.Api.Services.Strategies
 
             if (currentState == "Idle")
             {
+                if (!StrategyFilterHelper.HasValidTodaySessionCandles(candles, minTodayCandles: 1)) return null;
+
                 // Verify with Option Chain: Institutional floor should defend this zone
                 if (!StrategyFilterHelper.CheckInstitutionalGate(_optionChain, lastCandle.Close, "BUY"))
                     return null;
@@ -1108,6 +1144,8 @@ namespace StoicTrade.Api.Services.Strategies
 
             if (currentState == "Idle")
             {
+                if (!StrategyFilterHelper.HasValidTodaySessionCandles(candles, minTodayCandles: 1)) return null;
+
                 decimal rvol = StrategyFilterHelper.CalculateRvol(candles);
                 if (StrategyFilterHelper.IsMiddayChopHours() && rvol < 1.8m) return null;
 

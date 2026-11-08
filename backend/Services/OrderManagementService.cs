@@ -88,6 +88,26 @@ namespace StoicTrade.Api.Services
                                 : ((openPosition.BuyAvg ?? 0m) > 0 ? (openPosition.BuyAvg ?? 0m) : 150m)));
 
                     int exitQty = openPosition.NetQty;
+                    string? brokerExitOrderId = null;
+
+                    // In Live Mode, fire exit order to broker FIRST and verify execution before closing local position tracking
+                    if (!isPaperMode)
+                    {
+                        if (!_fyersApiService.IsEngineRunning)
+                        {
+                            _logger.LogWarning("OrderManagementService [LIVE]: Engine stopped; cannot place live EXIT order for {Symbol}.", openPosition.Symbol);
+                            return false;
+                        }
+
+                        var (exitSuccess, exitMsg, fyersOrderId) = await _fyersApiService.PlaceOrderAsync(openPosition.Symbol, "SELL", exitQty, exitPrice);
+                        if (!exitSuccess)
+                        {
+                            _logger.LogError("OrderManagementService [LIVE]: Fyers rejected EXIT order for {Symbol}: {Msg}. Keeping position active for retry.", openPosition.Symbol, exitMsg);
+                            return false;
+                        }
+                        brokerExitOrderId = fyersOrderId;
+                    }
+
                     openPosition.TotalSellQty += exitQty;
                     openPosition.TotalSellValue = (openPosition.TotalSellValue ?? 0m) + (exitQty * exitPrice);
                     openPosition.SellAvg = openPosition.TotalSellQty > 0 ? (openPosition.TotalSellValue ?? 0m) / openPosition.TotalSellQty : exitPrice;
@@ -98,7 +118,7 @@ namespace StoicTrade.Api.Services
 
                     dbContext.TradeLogs.Add(new TradeLog
                     {
-                        OrderId = System.Guid.NewGuid().ToString("N").Substring(0, 10).ToUpper(),
+                        OrderId = !string.IsNullOrEmpty(brokerExitOrderId) ? brokerExitOrderId : System.Guid.NewGuid().ToString("N").Substring(0, 10).ToUpper(),
                         StrategyName = openPosition.StrategyName ?? signal.StrategyName,
                         Instrument = openPosition.Symbol,
                         TradeType = "SELL",
@@ -134,12 +154,6 @@ namespace StoicTrade.Api.Services
                     await dbContext.SaveChangesAsync();
                     _logger.LogInformation("OrderManagementService [{Mode}]: Cleanly exited position for {Strategy} ({Symbol}) at ₹{ExitPrice}. Realized P&L: ₹{PnL:F2}", 
                         isPaperMode ? "PAPER" : "LIVE", openPosition.StrategyName, openPosition.Symbol, exitPrice, openPosition.RealizedProfit);
-
-                    // If Live Mode, fire exit order to broker
-                    if (!isPaperMode && _fyersApiService.IsEngineRunning)
-                    {
-                        await _fyersApiService.PlaceOrderAsync(openPosition.Symbol, "SELL", exitQty, exitPrice);
-                    }
 
                     // Clear Redis state for this strategy
                     var redis = scope.ServiceProvider.GetService<RedisService>();
@@ -204,16 +218,82 @@ namespace StoicTrade.Api.Services
                 return false;
             }
 
-            // Always prioritize real-time live Market LTP at the exact moment of execution
-            decimal? currentLiveLtp = optionEngine.ResolveOptionLtp(normalisedInstrument);
-            decimal executionPrice = (currentLiveLtp.HasValue && currentLiveLtp.Value > 0)
-                ? currentLiveLtp.Value
-                : (signal.ExpectedPrice > 0 && signal.ExpectedPrice < 5000 
-                    ? signal.ExpectedPrice 
-                    : (signal.Price > 0 && signal.Price < 5000 ? signal.Price : 150m));
+            // Always require real-time live Market LTP from today's session at the exact moment of entry execution
+            decimal? currentLiveLtp = optionEngine.ResolveOptionLtp(normalisedInstrument, requireLiveTodayQuote: true);
+            if (!currentLiveLtp.HasValue || currentLiveLtp.Value <= 0)
+            {
+                _logger.LogWarning("OrderManagementService: Aborting BUY order for {Instrument} ({Strategy}) — live today's option LTP is not available yet (preventing execution at yesterday's closing price).",
+                    normalisedInstrument, signal.StrategyName);
+                return false;
+            }
+            decimal executionPrice = currentLiveLtp.Value;
 
             _logger.LogInformation("OrderManagementService [{Mode}]: Executing order for {Action} {Quantity} {Instrument} at ₹{ExecutionPrice} ({Strategy})", 
                 isPaperMode ? "PAPER" : "LIVE", signal.Action, signal.Quantity, normalisedInstrument, executionPrice, signal.StrategyName);
+
+            string? brokerEntryOrderId = null;
+
+            // In Live Mode, dispatch real BUY order to Fyers FIRST before creating local position tracking
+            if (!isPaperMode)
+            {
+                if (!_fyersApiService.IsEngineRunning)
+                {
+                    _logger.LogWarning("OrderManagementService [LIVE]: Engine is not running. Aborting live BUY order for {Instrument}.", normalisedInstrument);
+                    return false;
+                }
+
+                var (orderSuccess, orderMsg, fyersOrderId) = await _fyersApiService.PlaceOrderAsync(normalisedInstrument, "BUY", signal.Quantity, executionPrice);
+                if (!orderSuccess)
+                {
+                    _logger.LogError("OrderManagementService [LIVE]: Fyers rejected BUY order for {Instrument}: {Msg}. Aborting position creation.", normalisedInstrument, orderMsg);
+                    dbContext.TradeLogs.Add(new TradeLog
+                    {
+                        OrderId = System.Guid.NewGuid().ToString("N").Substring(0, 10).ToUpper(),
+                        StrategyName = signal.StrategyName,
+                        Instrument = normalisedInstrument,
+                        TradeType = "BUY",
+                        Quantity = signal.Quantity,
+                        ExecutionPrice = executionPrice,
+                        Timestamp = System.DateTime.UtcNow,
+                        Status = "REJECTED",
+                        Reason = $"Fyers Broker Rejected: {orderMsg}"
+                    });
+                    await dbContext.SaveChangesAsync();
+                    return false;
+                }
+                brokerEntryOrderId = fyersOrderId;
+
+                // Sync actual broker fill price (buyAvg) from Fyers netPositions so Target & SL are anchored to real broker execution price
+                try
+                {
+                    await Task.Delay(400);
+                    var livePositions = await _fyersApiService.GetPositionsAsync();
+                    if (livePositions.ValueKind != System.Text.Json.JsonValueKind.Undefined &&
+                        livePositions.TryGetProperty("netPositions", out var netPosArr))
+                    {
+                        foreach (var p in netPosArr.EnumerateArray())
+                        {
+                            string sym = p.TryGetProperty("symbol", out var sProp) ? sProp.GetString() ?? "" : "";
+                            int nq = p.TryGetProperty("netQty", out var nqProp) ? nqProp.GetInt32() : 0;
+                            if (nq > 0 && NormaliseSymbol(sym) == normalisedInstrument)
+                            {
+                                decimal brokerBuyAvg = p.TryGetProperty("buyAvg", out var baProp) ? baProp.GetDecimal() : 0m;
+                                if (brokerBuyAvg > 0 && brokerBuyAvg < 5000)
+                                {
+                                    _logger.LogInformation("OrderManagementService [LIVE]: Synced actual Fyers fill price ₹{BrokerFill} (quote was ₹{QuotePrice}) for {Instrument}",
+                                        brokerBuyAvg, executionPrice, normalisedInstrument);
+                                    executionPrice = brokerBuyAvg;
+                                }
+                                break;
+                            }
+                        }
+                    }
+                }
+                catch (System.Exception syncEx)
+                {
+                    _logger.LogWarning(syncEx, "OrderManagementService [LIVE]: Could not fetch post-fill buyAvg from Fyers, using live LTP ₹{ExecutionPrice}", executionPrice);
+                }
+            }
 
             // Isolate position per (Symbol, StrategyName) so different strategies don't merge or overwrite each other
             var position = dbContext.PaperPositions.FirstOrDefault(p => 
@@ -248,6 +328,14 @@ namespace StoicTrade.Api.Services
                 ? stratConfig.TrailingActivationPoint
                 : (globalSettings?.TrailingActivationPoint ?? 15.0m);
 
+            // Anchor Target and Stop Loss deltas directly to the actual executionPrice
+            decimal targetDelta = (signal.TargetPrice > signal.Price && signal.Price > 0)
+                ? (signal.TargetPrice - signal.Price)
+                : System.Math.Max(35.0m, executionPrice * 0.30m);
+            decimal slDelta = (signal.Price > signal.StopLossPrice && signal.StopLossPrice > 0)
+                ? (signal.Price - signal.StopLossPrice)
+                : System.Math.Max(18.0m, executionPrice * 0.18m);
+
             position.TotalBuyQty += signal.Quantity;
             position.TotalBuyValue = (position.TotalBuyValue ?? 0m) + (signal.Quantity * executionPrice);
             position.BuyAvg = position.TotalBuyQty > 0 ? (position.TotalBuyValue ?? 0m) / position.TotalBuyQty : executionPrice;
@@ -257,13 +345,13 @@ namespace StoicTrade.Api.Services
             position.TrailingActivationPoint = trailingActivation > 0 ? trailingActivation : 15.0m;
             position.IsTrailingActive = false;
             position.IsPartialBooked = false;
-            position.TargetPrice = signal.TargetPrice > 0 ? signal.TargetPrice : Math.Round(executionPrice + Math.Max(35.0m, executionPrice * 0.30m), 2);
-            position.StopLossPrice = signal.StopLossPrice > 0 ? signal.StopLossPrice : Math.Round(Math.Max(5.0m, executionPrice - Math.Max(18.0m, executionPrice * 0.18m)), 2);
+            position.TargetPrice = System.Math.Round(executionPrice + targetDelta, 2);
+            position.StopLossPrice = System.Math.Round(System.Math.Max(5.0m, executionPrice - slDelta), 2);
             position.UpdatedAt = System.DateTime.UtcNow;
 
             dbContext.TradeLogs.Add(new TradeLog
             {
-                OrderId = System.Guid.NewGuid().ToString("N").Substring(0, 10).ToUpper(),
+                OrderId = !string.IsNullOrEmpty(brokerEntryOrderId) ? brokerEntryOrderId : System.Guid.NewGuid().ToString("N").Substring(0, 10).ToUpper(),
                 StrategyName = signal.StrategyName,
                 Instrument = normalisedInstrument,
                 TradeType = "BUY",
@@ -271,16 +359,10 @@ namespace StoicTrade.Api.Services
                 ExecutionPrice = executionPrice,
                 Timestamp = System.DateTime.UtcNow,
                 Status = "EXECUTED",
-                Reason = "Strategy Entry Order"
+                Reason = isPaperMode ? "Strategy Entry Order" : "Live Strategy Entry Order"
             });
 
             await dbContext.SaveChangesAsync();
-
-            // If Live Mode, dispatch real order to Fyers
-            if (!isPaperMode && _fyersApiService.IsEngineRunning)
-            {
-                await _fyersApiService.PlaceOrderAsync(normalisedInstrument, "BUY", signal.Quantity, executionPrice);
-            }
 
             return true;
         }
@@ -364,6 +446,26 @@ namespace StoicTrade.Api.Services
                     int partialQty = (pos.NetQty / 65 / 2) * 65;
                     if (partialQty == 0) partialQty = pos.NetQty / 2;
 
+                    string? partialOrderId = null;
+                    if (!isPaperMode)
+                    {
+                        if (!_fyersApiService.IsEngineRunning)
+                        {
+                            _logger.LogWarning("MonitorPositions [LIVE]: Engine stopped; cannot place partial exit order for {Symbol}.", pos.Symbol);
+                            continue;
+                        }
+
+                        var (success, msg, orderId) = await _fyersApiService.PlaceOrderAsync(pos.Symbol, "SELL", partialQty, currentLtp);
+                        _logger.LogInformation("MonitorPositions [LIVE]: Partial profit exit order sent to Fyers for {Symbol} ({Qty} qty): Success={Success}, Msg={Msg}",
+                            pos.Symbol, partialQty, success, msg);
+                        if (!success)
+                        {
+                            _logger.LogError("MonitorPositions [LIVE]: Fyers rejected partial exit order for {Symbol}: {Msg}. Will retry on next tick.", pos.Symbol, msg);
+                            continue;
+                        }
+                        partialOrderId = orderId;
+                    }
+
                     pos.TotalSellQty += partialQty;
                     pos.TotalSellValue = (pos.TotalSellValue ?? 0m) + (partialQty * currentLtp);
                     pos.SellAvg = pos.TotalSellQty > 0 ? (pos.TotalSellValue ?? 0m) / pos.TotalSellQty : currentLtp;
@@ -388,7 +490,7 @@ namespace StoicTrade.Api.Services
 
                     dbContext.TradeLogs.Add(new TradeLog
                     {
-                        OrderId = System.Guid.NewGuid().ToString("N").Substring(0, 10).ToUpper(),
+                        OrderId = !string.IsNullOrEmpty(partialOrderId) ? partialOrderId : System.Guid.NewGuid().ToString("N").Substring(0, 10).ToUpper(),
                         StrategyName = pos.StrategyName ?? "Target 1 Partial Exit",
                         Instrument = pos.Symbol,
                         TradeType = "SELL",
@@ -399,13 +501,6 @@ namespace StoicTrade.Api.Services
                         Reason = partialReason
                     });
 
-                    // In Live mode, square off the partial lots
-                    if (!isPaperMode && _fyersApiService.IsEngineRunning)
-                    {
-                        var (success, msg, orderId) = await _fyersApiService.PlaceOrderAsync(pos.Symbol, "SELL", partialQty, currentLtp);
-                        _logger.LogInformation("MonitorPositions [LIVE]: Partial profit exit order sent to Fyers for {Symbol} ({Qty} qty): Success={Success}, Msg={Msg}",
-                            pos.Symbol, partialQty, success, msg);
-                    }
                     continue; // Keep the remaining position active as a runner!
                 }
 
@@ -418,6 +513,55 @@ namespace StoicTrade.Api.Services
                             : $"Stop Loss Hit (LTP ₹{currentLtp:F2} <= SL ₹{pos.StopLossPrice:F2})");
 
                     int exitQty = pos.NetQty;
+                    string? brokerSlOrderId = null;
+
+                    // In Live mode, square off via Fyers FIRST before closing local position tracking
+                    if (!isPaperMode)
+                    {
+                        if (!_fyersApiService.IsEngineRunning)
+                        {
+                            _logger.LogWarning("MonitorPositions [LIVE]: Engine stopped; cannot place live SL/Target exit order for {Symbol}.", pos.Symbol);
+                            continue;
+                        }
+
+                        var (success, msg, orderId) = await _fyersApiService.PlaceOrderAsync(pos.Symbol, "SELL", exitQty, currentLtp);
+                        _logger.LogInformation("MonitorPositions [LIVE]: Full exit order sent to Fyers for {Symbol} ({Qty} qty): Success={Success}, Msg={Msg}",
+                            pos.Symbol, exitQty, success, msg);
+
+                        if (!success)
+                        {
+                            // Check if position was already squared off manually on Fyers terminal
+                            bool stillOpenOnBroker = true;
+                            try
+                            {
+                                var livePositions = await _fyersApiService.GetPositionsAsync();
+                                if (livePositions.ValueKind != System.Text.Json.JsonValueKind.Undefined &&
+                                    livePositions.TryGetProperty("netPositions", out var netPosArr))
+                                {
+                                    stillOpenOnBroker = false;
+                                    foreach (var p in netPosArr.EnumerateArray())
+                                    {
+                                        string sym = p.TryGetProperty("symbol", out var sProp) ? sProp.GetString() ?? "" : "";
+                                        int nq = p.TryGetProperty("netQty", out var nqProp) ? nqProp.GetInt32() : 0;
+                                        if (nq > 0 && NormaliseSymbol(sym) == NormaliseSymbol(pos.Symbol))
+                                        {
+                                            stillOpenOnBroker = true;
+                                            break;
+                                        }
+                                    }
+                                }
+                            }
+                            catch { }
+
+                            if (stillOpenOnBroker)
+                            {
+                                _logger.LogError("MonitorPositions [LIVE]: Fyers exit order failed for {Symbol} and position is still open on broker. Retrying on next tick.", pos.Symbol);
+                                continue;
+                            }
+                        }
+                        brokerSlOrderId = orderId;
+                    }
+
                     pos.TotalSellQty += exitQty;
                     pos.TotalSellValue = (pos.TotalSellValue ?? 0m) + (exitQty * currentLtp);
                     pos.SellAvg = pos.TotalSellQty > 0 ? (pos.TotalSellValue ?? 0m) / pos.TotalSellQty : currentLtp;
@@ -429,7 +573,7 @@ namespace StoicTrade.Api.Services
 
                     dbContext.TradeLogs.Add(new TradeLog
                     {
-                        OrderId = System.Guid.NewGuid().ToString("N").Substring(0, 10).ToUpper(),
+                        OrderId = !string.IsNullOrEmpty(brokerSlOrderId) ? brokerSlOrderId : System.Guid.NewGuid().ToString("N").Substring(0, 10).ToUpper(),
                         StrategyName = pos.StrategyName ?? "Target/SL Trigger",
                         Instrument = pos.Symbol,
                         TradeType = "SELL",
@@ -477,14 +621,6 @@ namespace StoicTrade.Api.Services
                             ExpiresAt = System.DateTime.UtcNow.AddMinutes(15)
                         }
                     );
-
-                    // In Live mode, square off via Fyers
-                    if (!isPaperMode && _fyersApiService.IsEngineRunning)
-                    {
-                        var (success, msg, orderId) = await _fyersApiService.PlaceOrderAsync(pos.Symbol, "SELL", exitQty, currentLtp);
-                        _logger.LogInformation("MonitorPositions [LIVE]: Full exit order sent to Fyers for {Symbol} ({Qty} qty): Success={Success}, Msg={Msg}",
-                            pos.Symbol, exitQty, success, msg);
-                    }
 
                     // Clear Redis lock
                     if (redis != null && !string.IsNullOrEmpty(pos.StrategyName))

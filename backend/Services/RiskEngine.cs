@@ -428,11 +428,16 @@ namespace StoicTrade.Api.Services
             if (!executed)
             {
                 _logger.LogWarning("RiskEngine: Order execution failed or was aborted by Order Manager for {StrategyName}", signal.StrategyName);
+                var strat = dbContext.StrategyConfigs.FirstOrDefault(s => s.StrategyName == signal.StrategyName);
+                if (strat != null)
+                {
+                    await _redisService.DeleteKeyAsync($"strategy_state_{strat.Id}");
+                }
                 return new RiskEvaluationResult
                 {
                     IsApproved = false,
                     Status = "Blocked",
-                    RejectionReason = "Order execution failed or unable to resolve contract"
+                    RejectionReason = "Order execution aborted: live today's option LTP or contract not available yet"
                 };
             }
 
